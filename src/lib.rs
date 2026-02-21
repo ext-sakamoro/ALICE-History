@@ -2,6 +2,35 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Moroya Sakamoto
 
+// ---------------------------------------------------------------------------
+// Modules
+// ---------------------------------------------------------------------------
+
+pub(crate) mod core;
+pub(crate) mod cosine_table;
+pub mod frequency;
+pub mod grid2d;
+pub mod multimodal;
+pub mod solver_1d;
+pub mod sparse;
+
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+
+pub use crate::core::measure_entropy;
+pub use frequency::{restore_frequency, FrequencyConfig};
+pub use grid2d::{restore_2d, restore_2d_batch, Grid2D, Grid2DConfig, NeighborMode};
+pub use multimodal::{
+    bayesian_fuse, fuse_grid, FusedEstimate, FusionConfig, ModalObservation, ModalityKind,
+};
+pub use solver_1d::{restore_1d, restore_1d_batch};
+pub use sparse::{restore_sparse, soft_threshold, SparseConfig};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 /// Kind of historical fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FragmentKind {
@@ -79,41 +108,6 @@ pub struct EntropyMeasurement {
 }
 
 // ---------------------------------------------------------------------------
-// FNV-1a hash (file-local, same as all ALICE crates)
-// ---------------------------------------------------------------------------
-
-const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0100_0000_01b3;
-
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut h = FNV_OFFSET;
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    h
-}
-
-/// Hash helper: convert an f64 slice to bytes and hash.
-fn hash_f64_slice(slice: &[f64]) -> u64 {
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * 8)
-    };
-    fnv1a(bytes)
-}
-
-/// Build a content hash for a Fragment from id + kind discriminant + data.
-fn fragment_content_hash(id: u64, kind: FragmentKind, data: &[f64]) -> u64 {
-    let mut buf: Vec<u8> = Vec::with_capacity(8 + 1 + data.len() * 8);
-    buf.extend_from_slice(&id.to_le_bytes());
-    buf.push(kind as u8);
-    for &v in data {
-        buf.extend_from_slice(&v.to_le_bytes());
-    }
-    fnv1a(&buf)
-}
-
-// ---------------------------------------------------------------------------
 // Fragment
 // ---------------------------------------------------------------------------
 
@@ -134,7 +128,7 @@ impl Fragment {
             mask.len(),
             "data and mask must have the same length"
         );
-        let content_hash = fragment_content_hash(id, kind, &data);
+        let content_hash = core::fragment_content_hash(id, kind, &data);
         Self {
             id,
             kind,
@@ -176,279 +170,178 @@ impl Default for InversionConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Entropy measurement
+// Backward-compatible API (delegates to solver_1d)
 // ---------------------------------------------------------------------------
 
-/// Measure Shannon entropy of a data sequence by binning values.
-///
-/// Values are linearly mapped into `bins` buckets between the data min and
-/// max.  Shannon entropy is computed as H = -sum(p * log2(p)) over non-zero
-/// bins.  `normalized_entropy` divides H by log2(bins).
-pub fn measure_entropy(data: &[f64], bins: usize) -> EntropyMeasurement {
-    if data.is_empty() || bins == 0 {
-        return EntropyMeasurement {
-            shannon_entropy: 0.0,
-            normalized_entropy: 0.0,
-            unique_symbols: 0,
-            total_symbols: 0,
-        };
-    }
-
-    let min_val = data.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_val = data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-    let range = max_val - min_val;
-    let mut counts = vec![0usize; bins];
-
-    if range == 0.0 {
-        // All values identical -- everything falls into bin 0.
-        counts[0] = data.len();
-    } else {
-        for &v in data {
-            let normalized = (v - min_val) / range; // 0.0 ..= 1.0
-            let idx = ((normalized * (bins as f64 - 1.0)).round() as usize).min(bins - 1);
-            counts[idx] += 1;
-        }
-    }
-
-    let n = data.len() as f64;
-    let mut entropy = 0.0f64;
-    let mut unique = 0usize;
-
-    for &c in &counts {
-        if c > 0 {
-            unique += 1;
-            let p = c as f64 / n;
-            entropy -= p * p.log2();
-        }
-    }
-
-    let max_entropy = if bins > 1 { (bins as f64).log2() } else { 1.0 };
-    let normalized = if max_entropy > 0.0 {
-        entropy / max_entropy
-    } else {
-        0.0
-    };
-
-    EntropyMeasurement {
-        shannon_entropy: entropy,
-        normalized_entropy: normalized,
-        unique_symbols: unique,
-        total_symbols: data.len(),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Confidence computation
-// ---------------------------------------------------------------------------
-
-/// Compute a ConfidenceMap based on distance from known values.
-///
-/// For each element, confidence is determined by proximity to the nearest
-/// known element.  Known elements receive confidence 1.0; missing elements
-/// receive a value that decays with distance (1 / (1 + distance)), clamped
-/// above `floor`.
-fn compute_confidence(
-    _data: &[f64],
-    mask: &[f64],
-    _restored: &[f64],
-    floor: f64,
-) -> ConfidenceMap {
-    let n = mask.len();
-    if n == 0 {
-        return ConfidenceMap {
-            scores: Vec::new(),
-            mean_confidence: 0.0,
-            min_confidence: 0.0,
-            restoration_boundary: floor,
-        };
-    }
-
-    // Forward pass: distance to nearest known element on the left.
-    let mut left_dist = vec![n as f64; n];
-    for i in 0..n {
-        if mask[i] == 1.0 {
-            left_dist[i] = 0.0;
-        } else if i > 0 {
-            left_dist[i] = left_dist[i - 1] + 1.0;
-        }
-    }
-
-    // Backward pass: distance to nearest known element on the right.
-    let mut right_dist = vec![n as f64; n];
-    for i in (0..n).rev() {
-        if mask[i] == 1.0 {
-            right_dist[i] = 0.0;
-        } else if i + 1 < n {
-            right_dist[i] = right_dist[i + 1] + 1.0;
-        }
-    }
-
-    let mut scores = Vec::with_capacity(n);
-    for i in 0..n {
-        let dist = left_dist[i].min(right_dist[i]);
-        let raw = 1.0 / (1.0 + dist);
-        scores.push(raw.max(floor));
-    }
-
-    let mean = scores.iter().sum::<f64>() / n as f64;
-    let min = scores.iter().cloned().fold(f64::INFINITY, f64::min);
-
-    ConfidenceMap {
-        scores,
-        mean_confidence: mean,
-        min_confidence: min,
-        restoration_boundary: floor,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Core solver: inverse entropy restoration
-// ---------------------------------------------------------------------------
-
-/// Core solver: inverse entropy restoration.
-///
-/// Uses iterative regularised least-squares to fill in missing values while
-/// minimising entropy of the result.
-///
-/// ## Algorithm
-///
-/// 1. Initialise missing values with the mean of known values.
-/// 2. For each iteration:
-///    a. Compute a local smoothness gradient (minimise discontinuities at
-///       boundaries between known and unknown regions).
-///    b. Apply Tikhonov regularisation (prevent overfitting).
-///    c. Update missing values: `new = old - lr * gradient`.
-///    d. Check convergence (`max_change < threshold`).
-/// 3. Compute confidence: higher for values near known data, lower for values
-///    far from known data.
+/// Restore a 1D fragment (backward-compatible alias for `restore_1d`).
 pub fn restore(fragment: &Fragment, config: &InversionConfig) -> RestorationResult {
-    let start = std::time::Instant::now();
-    let n = fragment.data.len();
+    solver_1d::restore_1d(fragment, config)
+}
 
-    // Handle empty fragment.
-    if n == 0 {
-        let field = RestorationField {
-            values: Vec::new(),
-            confidence: ConfidenceMap {
-                scores: Vec::new(),
-                mean_confidence: 0.0,
-                min_confidence: 0.0,
-                restoration_boundary: config.confidence_floor,
-            },
-            entropy_before: 0.0,
-            entropy_after: 0.0,
-            iterations: 0,
-            content_hash: fnv1a(&[]),
-        };
-        return RestorationResult {
-            fragment_id: fragment.id,
-            field,
-            elapsed_ns: start.elapsed().as_nanos() as u64,
-            content_hash: fnv1a(&[]),
-        };
-    }
+/// Batch restore multiple fragments (backward-compatible alias for `restore_1d_batch`).
+pub fn restore_batch(
+    fragments: &[Fragment],
+    config: &InversionConfig,
+) -> Vec<RestorationResult> {
+    solver_1d::restore_1d_batch(fragments, config)
+}
 
-    let entropy_before = measure_entropy(&fragment.data, 64).shannon_entropy;
+// ---------------------------------------------------------------------------
+// Strategy enum + unified API
+// ---------------------------------------------------------------------------
 
-    // Step 1: initialise restored array -- copy known, fill missing with mean.
-    let known_sum: f64 = fragment
-        .data
-        .iter()
-        .zip(fragment.mask.iter())
-        .filter(|(_, &m)| m == 1.0)
-        .map(|(&d, _)| d)
-        .sum();
-    let known_count = fragment.mask.iter().filter(|&&m| m == 1.0).count();
-    let mean_known = if known_count > 0 {
-        known_sum / known_count as f64
-    } else {
-        0.0
+/// Restoration strategy selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strategy {
+    /// 1D linear interpolation (original solver).
+    Linear1D,
+    /// 2D Gauss-Seidel grid solver.
+    Grid2D,
+    /// DCT + POCS frequency-domain restoration.
+    Frequency,
+    /// ISTA/FISTA compressed sensing.
+    Sparse,
+    /// Multi-modal Bayesian fusion.
+    MultiModal,
+    /// Automatic strategy selection based on data characteristics.
+    Auto,
+}
+
+/// Unified restoration entry point supporting all strategies.
+///
+/// ## Parameters
+/// - `fragment`: The degraded 1D fragment.
+/// - `config`: Solver configuration (iterations, threshold, etc.).
+/// - `strategy`: Which solver to use.
+/// - `grid_dims`: Required for 2D strategies (rows, cols). If `None` and a 2D
+///   strategy is requested, falls back to 1D.
+/// - `modal_observations`: Required for `MultiModal` strategy. Each element
+///   contains observations for the corresponding grid position.
+/// - `fusion_config`: Required for `MultiModal` strategy.
+///
+/// ## Auto strategy logic
+/// - `grid_dims` present + `known_fraction < 0.1` -> Sparse (FISTA)
+/// - `grid_dims` present + `known_fraction < 0.5` -> Frequency (DCT+POCS)
+/// - `grid_dims` present -> Grid2D (Gauss-Seidel)
+/// - Otherwise -> Linear1D
+pub fn restore_advanced(
+    fragment: &Fragment,
+    config: &InversionConfig,
+    strategy: Strategy,
+    grid_dims: Option<(usize, usize)>,
+    modal_observations: Option<&[Vec<ModalObservation>]>,
+    fusion_config: Option<&FusionConfig>,
+) -> RestorationResult {
+    let effective_strategy = match strategy {
+        Strategy::Auto => select_auto_strategy(fragment, grid_dims),
+        other => other,
     };
 
-    let mut restored: Vec<f64> = fragment
-        .data
-        .iter()
-        .zip(fragment.mask.iter())
-        .map(|(&d, &m)| if m == 1.0 { d } else { mean_known })
-        .collect();
+    match effective_strategy {
+        Strategy::Linear1D | Strategy::Auto => restore_1d(fragment, config),
 
-    // Step 2: iterative solver.
-    let learning_rate = 0.5;
-    let mut iterations: u32 = 0;
-
-    for _iter in 0..config.max_iterations {
-        iterations = _iter + 1;
-        let mut max_change: f64 = 0.0;
-
-        // We only update missing positions.
-        for i in 0..n {
-            if fragment.mask[i] == 1.0 {
-                continue; // known -- do not touch
+        Strategy::Grid2D => {
+            if let Some((rows, cols)) = grid_dims {
+                let grid = fragment_to_grid(fragment, rows, cols);
+                let grid_config = inversion_to_grid2d_config(config);
+                let mut r = grid2d::restore_2d(&grid, &grid_config);
+                r.fragment_id = fragment.id;
+                r
+            } else {
+                restore_1d(fragment, config)
             }
-
-            // (a) Smoothness gradient: encourage value to match neighbours.
-            let left = if i > 0 { restored[i - 1] } else { restored[i] };
-            let right = if i + 1 < n { restored[i + 1] } else { restored[i] };
-            let neighbour_avg = (left + right) * 0.5;
-            let smooth_grad = restored[i] - neighbour_avg;
-
-            // (b) Tikhonov regularisation: pull toward mean.
-            let reg_grad = config.regularization * (restored[i] - mean_known);
-
-            // (c) Total gradient and update.
-            let grad = smooth_grad + reg_grad;
-            let new_val = restored[i] - learning_rate * grad;
-            let change = (new_val - restored[i]).abs();
-            if change > max_change {
-                max_change = change;
-            }
-            restored[i] = new_val;
         }
 
-        // (d) Convergence check.
-        if max_change < config.convergence_threshold {
-            break;
+        Strategy::Frequency => {
+            if let Some((rows, cols)) = grid_dims {
+                let grid = fragment_to_grid(fragment, rows, cols);
+                let freq_config = FrequencyConfig {
+                    max_pocs_iterations: config.max_iterations.min(100),
+                    convergence_threshold: config.convergence_threshold,
+                    confidence_floor: config.confidence_floor,
+                    ..FrequencyConfig::default()
+                };
+                let mut r = frequency::restore_frequency(&grid, &freq_config);
+                r.fragment_id = fragment.id;
+                r
+            } else {
+                restore_1d(fragment, config)
+            }
         }
-    }
 
-    // Step 3: confidence and entropy.
-    let confidence =
-        compute_confidence(&fragment.data, &fragment.mask, &restored, config.confidence_floor);
-    let entropy_after = measure_entropy(&restored, 64).shannon_entropy;
-    let content_hash = hash_f64_slice(&restored);
+        Strategy::Sparse => {
+            if let Some((rows, cols)) = grid_dims {
+                let grid = fragment_to_grid(fragment, rows, cols);
+                let sparse_config = SparseConfig {
+                    max_iterations: config.max_iterations.min(500),
+                    convergence_threshold: config.convergence_threshold,
+                    confidence_floor: config.confidence_floor,
+                    ..SparseConfig::default()
+                };
+                let mut r = sparse::restore_sparse(&grid, &sparse_config);
+                r.fragment_id = fragment.id;
+                r
+            } else {
+                restore_1d(fragment, config)
+            }
+        }
 
-    let field = RestorationField {
-        values: restored,
-        confidence,
-        entropy_before,
-        entropy_after,
-        iterations,
-        content_hash,
-    };
-
-    let result_hash = {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&fragment.id.to_le_bytes());
-        buf.extend_from_slice(&field.content_hash.to_le_bytes());
-        fnv1a(&buf)
-    };
-
-    RestorationResult {
-        fragment_id: fragment.id,
-        field,
-        elapsed_ns: start.elapsed().as_nanos() as u64,
-        content_hash: result_hash,
+        Strategy::MultiModal => {
+            if let (Some((rows, cols)), Some(obs), Some(fc)) =
+                (grid_dims, modal_observations, fusion_config)
+            {
+                let grid = fragment_to_grid(fragment, rows, cols);
+                let mut r = multimodal::fuse_grid(&grid, obs, fc);
+                r.fragment_id = fragment.id;
+                r
+            } else {
+                restore_1d(fragment, config)
+            }
+        }
     }
 }
 
-/// Batch restore multiple fragments.
-pub fn restore_batch(fragments: &[Fragment], config: &InversionConfig) -> Vec<RestorationResult> {
-    fragments.iter().map(|f| restore(f, config)).collect()
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn select_auto_strategy(fragment: &Fragment, grid_dims: Option<(usize, usize)>) -> Strategy {
+    let kf = fragment.known_fraction();
+
+    if grid_dims.is_some() {
+        if kf < 0.1 {
+            Strategy::Sparse
+        } else if kf < 0.5 {
+            Strategy::Frequency
+        } else {
+            Strategy::Grid2D
+        }
+    } else {
+        Strategy::Linear1D
+    }
+}
+
+fn fragment_to_grid(fragment: &Fragment, rows: usize, cols: usize) -> grid2d::Grid2D {
+    let n = rows * cols;
+    let mut data = fragment.data.clone();
+    let mut mask = fragment.mask.clone();
+    data.resize(n, 0.0);
+    mask.resize(n, 0.0);
+    grid2d::Grid2D::new(rows, cols, data, mask)
+}
+
+fn inversion_to_grid2d_config(config: &InversionConfig) -> Grid2DConfig {
+    Grid2DConfig {
+        max_iterations: config.max_iterations,
+        convergence_threshold: config.convergence_threshold,
+        regularization: config.regularization,
+        confidence_floor: config.confidence_floor,
+        neighbor_mode: NeighborMode::Four,
+    }
 }
 
 // ===========================================================================
-// Tests
+// Tests (backward compatibility + unified API + original tests)
 // ===========================================================================
 
 #[cfg(test)]
@@ -538,7 +431,6 @@ mod tests {
 
     #[test]
     fn test_entropy_uniform_data() {
-        // All identical values => entropy should be 0 (one bin occupied).
         let data = vec![5.0; 100];
         let e = measure_entropy(&data, 16);
         assert!((e.shannon_entropy - 0.0).abs() < 1e-12);
@@ -548,7 +440,6 @@ mod tests {
 
     #[test]
     fn test_entropy_two_values() {
-        // Alternating 0 and 1, 50/50 split => entropy ~1 bit.
         let data: Vec<f64> = (0..100).map(|i| (i % 2) as f64).collect();
         let e = measure_entropy(&data, 2);
         assert!((e.shannon_entropy - 1.0).abs() < 0.01);
@@ -575,7 +466,7 @@ mod tests {
         assert!(e.normalized_entropy <= 1.0 + 1e-12);
     }
 
-    // -- Restore: all known data (identity) ----------------------------------
+    // -- Backward-compatible restore() API -----------------------------------
 
     #[test]
     fn test_restore_all_known_returns_same_values() {
@@ -594,33 +485,24 @@ mod tests {
         }
     }
 
-    // -- Restore: partially missing data -------------------------------------
-
     #[test]
     fn test_restore_fills_single_gap() {
-        // Known: [10, ?, 30] -- expect middle restored near 20.
         let data = vec![10.0, 0.0, 30.0];
         let mask = vec![1.0, 0.0, 1.0];
         let f = Fragment::new(2, FragmentKind::Inscription, data, mask, 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
         let mid = r.field.values[1];
-        assert!(
-            (mid - 20.0).abs() < 1.0,
-            "expected ~20, got {}",
-            mid
-        );
+        assert!((mid - 20.0).abs() < 1.0, "expected ~20, got {}", mid);
     }
 
     #[test]
     fn test_restore_fills_multiple_gaps() {
-        // Known: [0, ?, ?, ?, 40]
         let data = vec![0.0, 0.0, 0.0, 0.0, 40.0];
         let mask = vec![1.0, 0.0, 0.0, 0.0, 1.0];
         let f = Fragment::new(3, FragmentKind::Audio, data, mask, 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // Restored values should be monotonically increasing-ish.
         for i in 0..4 {
             assert!(
                 r.field.values[i] <= r.field.values[i + 1] + 1.0,
@@ -632,11 +514,8 @@ mod tests {
         }
     }
 
-    // -- Restore: heavily degraded -------------------------------------------
-
     #[test]
     fn test_restore_heavily_degraded() {
-        // Only first and last known.
         let n = 50;
         let mut data = vec![0.0; n];
         let mut mask = vec![0.0; n];
@@ -647,7 +526,6 @@ mod tests {
         let f = Fragment::new(4, FragmentKind::Image, data, mask, 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // All restored values should be close to 100 (smooth interpolation between equal endpoints).
         for (i, &v) in r.field.values.iter().enumerate() {
             assert!(
                 (v - 100.0).abs() < 5.0,
@@ -658,25 +536,17 @@ mod tests {
         }
     }
 
-    // -- Entropy decrease after restoration ----------------------------------
-
     #[test]
     fn test_entropy_decreases_after_restoration() {
-        // Random-ish degraded data should become smoother (lower entropy).
         let data = vec![5.0, 0.0, 100.0, 0.0, 5.0, 0.0, 100.0, 0.0, 5.0];
         let mask = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
         let f = Fragment::new(5, FragmentKind::Text, data, mask, 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // We check that entropy_after <= entropy_before (restoration should smooth).
-        // Note: with very few data points the effect may be modest so we just
-        // verify the measurement is computed.
         assert!(r.field.entropy_before >= 0.0);
         assert!(r.field.entropy_after >= 0.0);
         assert!(r.field.iterations > 0);
     }
-
-    // -- Confidence scoring --------------------------------------------------
 
     #[test]
     fn test_confidence_known_elements_are_max() {
@@ -685,7 +555,6 @@ mod tests {
         let f = Fragment::new(6, FragmentKind::Artifact, data, mask, 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // Known positions should have confidence 1.0.
         assert!((r.field.confidence.scores[0] - 1.0).abs() < 1e-12);
         assert!((r.field.confidence.scores[4] - 1.0).abs() < 1e-12);
     }
@@ -696,9 +565,8 @@ mod tests {
         let mask = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         let f = Fragment::new(7, FragmentKind::Text, data, mask, 0);
         let mut config = InversionConfig::default();
-        config.confidence_floor = 0.05; // low floor so decay is visible
+        config.confidence_floor = 0.05;
         let r = restore(&f, &config);
-        // Confidence at index 1 (near known) should be > confidence at index 4 (center).
         assert!(
             r.field.confidence.scores[1] > r.field.confidence.scores[4],
             "confidence should decay: near={} center={}",
@@ -716,19 +584,14 @@ mod tests {
         config.confidence_floor = 0.3;
         let r = restore(&f, &config);
         for &s in &r.field.confidence.scores {
-            assert!(
-                s >= 0.3 - 1e-12,
-                "confidence below floor: {}",
-                s
-            );
+            assert!(s >= 0.3 - 1e-12, "confidence below floor: {}", s);
         }
     }
 
-    // -- Batch restoration ---------------------------------------------------
-
     #[test]
     fn test_restore_batch_multiple() {
-        let f1 = Fragment::new(10, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f1 =
+            Fragment::new(10, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
         let f2 = Fragment::new(11, FragmentKind::Image, vec![5.0, 5.0], vec![1.0, 1.0], 0);
         let config = InversionConfig::default();
         let results = restore_batch(&[f1, f2], &config);
@@ -744,19 +607,16 @@ mod tests {
         assert!(results.is_empty());
     }
 
-    // -- Hash determinism ----------------------------------------------------
-
     #[test]
     fn test_restore_hash_deterministic() {
-        let f = Fragment::new(99, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f =
+            Fragment::new(99, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
         let config = InversionConfig::default();
         let r1 = restore(&f, &config);
         let r2 = restore(&f, &config);
         assert_eq!(r1.field.content_hash, r2.field.content_hash);
         assert_eq!(r1.content_hash, r2.content_hash);
     }
-
-    // -- Edge case: empty fragment -------------------------------------------
 
     #[test]
     fn test_restore_empty_fragment() {
@@ -767,20 +627,15 @@ mod tests {
         assert_eq!(r.field.iterations, 0);
     }
 
-    // -- Edge case: all missing ----------------------------------------------
-
     #[test]
     fn test_restore_all_missing() {
         let f = Fragment::new(0, FragmentKind::Text, vec![0.0; 10], vec![0.0; 10], 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // With no known data, mean_known = 0.0, all values initialised to 0.0, converge to 0.0.
         for &v in &r.field.values {
             assert!((v - 0.0).abs() < 1e-6, "expected ~0, got {}", v);
         }
     }
-
-    // -- FragmentKind variants -----------------------------------------------
 
     #[test]
     fn test_all_fragment_kinds() {
@@ -797,15 +652,135 @@ mod tests {
         }
     }
 
-    // -- Elapsed time is set -------------------------------------------------
-
     #[test]
     fn test_restoration_elapsed_ns() {
-        let f = Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f =
+            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
         let config = InversionConfig::default();
         let r = restore(&f, &config);
-        // elapsed_ns should be > 0 (we did actual work).
-        // On very fast machines this could theoretically be 0 but extremely unlikely.
         assert!(r.elapsed_ns < 10_000_000_000, "took too long");
+    }
+
+    // -- Strategy enum tests -------------------------------------------------
+
+    #[test]
+    fn test_strategy_auto_selects_1d_without_grid() {
+        let f =
+            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(&f, &config, Strategy::Auto, None, None, None);
+        assert_eq!(r.fragment_id, 0);
+        assert!(!r.field.values.is_empty());
+    }
+
+    #[test]
+    fn test_strategy_auto_selects_sparse_low_known() {
+        let mut data = vec![0.0; 100];
+        let mut mask = vec![0.0; 100];
+        data[0] = 1.0;
+        mask[0] = 1.0;
+        data[50] = 1.0;
+        mask[50] = 1.0;
+        data[99] = 1.0;
+        mask[99] = 1.0;
+        let f = Fragment::new(0, FragmentKind::Image, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(&f, &config, Strategy::Auto, Some((10, 10)), None, None);
+        assert_eq!(r.field.values.len(), 100);
+    }
+
+    #[test]
+    fn test_strategy_grid2d_explicit() {
+        let data = vec![10.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
+        let mask = vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let f = Fragment::new(42, FragmentKind::Image, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(&f, &config, Strategy::Grid2D, Some((3, 3)), None, None);
+        assert_eq!(r.fragment_id, 42);
+        assert_eq!(r.field.values.len(), 9);
+    }
+
+    #[test]
+    fn test_strategy_frequency_explicit() {
+        let data = vec![5.0; 16];
+        let mask = vec![
+            1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0,
+        ];
+        let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(
+            &f,
+            &config,
+            Strategy::Frequency,
+            Some((4, 4)),
+            None,
+            None,
+        );
+        assert_eq!(r.field.values.len(), 16);
+    }
+
+    #[test]
+    fn test_strategy_sparse_explicit() {
+        let data = vec![100.0; 9];
+        let mask = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(
+            &f,
+            &config,
+            Strategy::Sparse,
+            Some((3, 3)),
+            None,
+            None,
+        );
+        assert_eq!(r.field.values.len(), 9);
+    }
+
+    #[test]
+    fn test_strategy_multimodal_explicit() {
+        let data = vec![0.0; 4];
+        let mask = vec![0.0; 4];
+        let f = Fragment::new(0, FragmentKind::Image, data, mask, 0);
+        let config = InversionConfig::default();
+
+        let obs: Vec<Vec<ModalObservation>> = (0..4)
+            .map(|_| {
+                vec![ModalObservation {
+                    mean: 25.0,
+                    variance: 1.0,
+                    modality: ModalityKind::Image,
+                }]
+            })
+            .collect();
+        let fc = FusionConfig {
+            prior_variance: 1e12,
+            ..FusionConfig::default()
+        };
+
+        let r = restore_advanced(
+            &f,
+            &config,
+            Strategy::MultiModal,
+            Some((2, 2)),
+            Some(&obs),
+            Some(&fc),
+        );
+        assert_eq!(r.field.values.len(), 4);
+        for &v in &r.field.values {
+            assert!(
+                (v - 25.0).abs() < 3.0,
+                "multimodal fusion should give ~25: {}",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_strategy_fallback_without_grid_dims() {
+        let f =
+            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_advanced(&f, &config, Strategy::Grid2D, None, None, None);
+        assert_eq!(r.field.values.len(), 3);
     }
 }

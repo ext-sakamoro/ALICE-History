@@ -7,6 +7,7 @@ description = "Inverse entropy restoration — reversing information degradation
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+rayon = "1"
 
 [profile.release]
 opt-level = 3
