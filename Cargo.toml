@@ -1,0 +1,22 @@
+[package]
+name = "alice-history"
+version = "0.1.0"
+edition = "2021"
+authors = ["Moroya Sakamoto"]
+description = "Inverse entropy restoration — reversing information degradation to recover original historical data"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
