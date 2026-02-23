@@ -4,7 +4,9 @@
 
 use rayon::prelude::*;
 
-use crate::core::{compute_confidence, fnv1a, hash_f64_slice, measure_entropy, result_content_hash};
+use crate::core::{
+    compute_confidence, fnv1a, hash_f64_slice, measure_entropy, result_content_hash,
+};
 use crate::{ConfidenceMap, Fragment, InversionConfig, RestorationField, RestorationResult};
 
 // ---------------------------------------------------------------------------
@@ -20,11 +22,11 @@ use crate::{ConfidenceMap, Fragment, InversionConfig, RestorationField, Restorat
 ///
 /// 1. Initialise missing values with the mean of known values.
 /// 2. For each iteration:
-///    a. Compute a local smoothness gradient (minimise discontinuities at
-///       boundaries between known and unknown regions).
-///    b. Apply Tikhonov regularisation (prevent overfitting).
-///    c. Update missing values: `new = old - lr * gradient`.
-///    d. Check convergence (`max_change < threshold`).
+///    - Compute a local smoothness gradient (minimise discontinuities at
+///      boundaries between known and unknown regions).
+///    - Apply Tikhonov regularisation (prevent overfitting).
+///    - Update missing values: `new = old - lr * gradient`.
+///    - Check convergence (`max_change < threshold`).
 /// 3. Compute confidence: higher for values near known data, lower for values
 ///    far from known data.
 pub fn restore_1d(fragment: &Fragment, config: &InversionConfig) -> RestorationResult {
@@ -91,7 +93,11 @@ pub fn restore_1d(fragment: &Fragment, config: &InversionConfig) -> RestorationR
             }
 
             let left = if i > 0 { restored[i - 1] } else { restored[i] };
-            let right = if i + 1 < n { restored[i + 1] } else { restored[i] };
+            let right = if i + 1 < n {
+                restored[i + 1]
+            } else {
+                restored[i]
+            };
             let neighbour_avg = (left + right) * 0.5;
             let smooth_grad = restored[i] - neighbour_avg;
 
@@ -112,8 +118,12 @@ pub fn restore_1d(fragment: &Fragment, config: &InversionConfig) -> RestorationR
     }
 
     // Step 3: confidence and entropy.
-    let confidence =
-        compute_confidence(&fragment.data, &fragment.mask, &restored, config.confidence_floor);
+    let confidence = compute_confidence(
+        &fragment.data,
+        &fragment.mask,
+        &restored,
+        config.confidence_floor,
+    );
     let entropy_after = measure_entropy(&restored, 64).shannon_entropy;
     let content_hash = hash_f64_slice(&restored);
 
@@ -141,7 +151,10 @@ pub fn restore_1d_batch(
     fragments: &[Fragment],
     config: &InversionConfig,
 ) -> Vec<RestorationResult> {
-    fragments.par_iter().map(|f| restore_1d(f, config)).collect()
+    fragments
+        .par_iter()
+        .map(|f| restore_1d(f, config))
+        .collect()
 }
 
 // ===========================================================================
@@ -220,8 +233,13 @@ mod tests {
 
     #[test]
     fn test_restore_1d_batch_multiple() {
-        let f1 =
-            Fragment::new(10, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f1 = Fragment::new(
+            10,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let f2 = Fragment::new(11, FragmentKind::Image, vec![5.0, 5.0], vec![1.0, 1.0], 0);
         let config = InversionConfig::default();
         let results = restore_1d_batch(&[f1, f2], &config);
@@ -232,8 +250,13 @@ mod tests {
 
     #[test]
     fn test_restore_1d_hash_deterministic() {
-        let f =
-            Fragment::new(99, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f = Fragment::new(
+            99,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let config = InversionConfig::default();
         let r1 = restore_1d(&f, &config);
         let r2 = restore_1d(&f, &config);
@@ -254,7 +277,108 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore_1d(&f, &config);
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!((v - 100.0).abs() < 5.0, "index {} too far from 100: {}", i, v);
+            assert!(
+                (v - 100.0).abs() < 5.0,
+                "index {} too far from 100: {}",
+                i,
+                v
+            );
         }
+    }
+
+    // -- Single-element fragment ----------------------------------------------
+
+    #[test]
+    fn test_restore_1d_single_known_element() {
+        let f = Fragment::new(0, FragmentKind::Text, vec![42.0], vec![1.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert_eq!(r.field.values.len(), 1);
+        assert!((r.field.values[0] - 42.0).abs() < 1e-12);
+        assert!((r.field.confidence.scores[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_restore_1d_single_missing_element() {
+        let f = Fragment::new(0, FragmentKind::Text, vec![0.0], vec![0.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert_eq!(r.field.values.len(), 1);
+        // No neighbors, no known values: stays at mean_known = 0
+        assert!(r.field.values[0].abs() < 1e-10);
+    }
+
+    // -- Two-element: one known, one missing ----------------------------------
+
+    #[test]
+    fn test_restore_1d_two_elements_left_known() {
+        let f = Fragment::new(0, FragmentKind::Text, vec![10.0, 0.0], vec![1.0, 0.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert_eq!(r.field.values.len(), 2);
+        assert!((r.field.values[0] - 10.0).abs() < 1e-12);
+        // Right element missing: should converge toward left value (10.0)
+        assert!((r.field.values[1] - 10.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_restore_1d_two_elements_right_known() {
+        let f = Fragment::new(0, FragmentKind::Text, vec![0.0, 20.0], vec![0.0, 1.0], 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert!((r.field.values[1] - 20.0).abs() < 1e-12);
+        assert!((r.field.values[0] - 20.0).abs() < 1.0);
+    }
+
+    // -- Fragment ID is preserved in result -----------------------------------
+
+    #[test]
+    fn test_restore_1d_fragment_id_preserved() {
+        let f = Fragment::new(
+            12345,
+            FragmentKind::Artifact,
+            vec![1.0, 2.0],
+            vec![1.0, 1.0],
+            0,
+        );
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert_eq!(r.fragment_id, 12345);
+    }
+
+    // -- Batch empty ----------------------------------------------------------
+
+    #[test]
+    fn test_restore_1d_batch_empty() {
+        let config = InversionConfig::default();
+        let results = restore_1d_batch(&[], &config);
+        assert!(results.is_empty());
+    }
+
+    // -- Entropy fields are non-negative --------------------------------------
+
+    #[test]
+    fn test_restore_1d_entropy_non_negative() {
+        let data = vec![1.0, 0.0, 5.0, 0.0, 10.0];
+        let mask = vec![1.0, 0.0, 1.0, 0.0, 1.0];
+        let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        assert!(r.field.entropy_before >= 0.0);
+        assert!(r.field.entropy_after >= 0.0);
+    }
+
+    // -- Confidence mean is within [min, 1.0] --------------------------------
+
+    #[test]
+    fn test_restore_1d_confidence_mean_in_range() {
+        let data = vec![1.0, 0.0, 0.0, 0.0, 1.0];
+        let mask = vec![1.0, 0.0, 0.0, 0.0, 1.0];
+        let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
+        let config = InversionConfig::default();
+        let r = restore_1d(&f, &config);
+        let cm = &r.field.confidence;
+        assert!(cm.mean_confidence >= cm.min_confidence - 1e-12);
+        assert!(cm.mean_confidence <= 1.0 + 1e-12);
     }
 }

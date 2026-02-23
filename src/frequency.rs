@@ -42,12 +42,12 @@ pub(crate) fn dct2_1d(input: &[f64], output: &mut [f64], table: &CosineTable) {
     let n = table.size;
     debug_assert_eq!(input.len(), n);
     debug_assert_eq!(output.len(), n);
-    for k in 0..n {
+    for (k, out) in output.iter_mut().enumerate() {
         let mut sum = 0.0;
-        for i in 0..n {
-            sum += input[i] * table.get(i, k);
+        for (i, &inp) in input.iter().enumerate() {
+            sum += inp * table.get(i, k);
         }
-        output[k] = sum;
+        *out = sum;
     }
 }
 
@@ -59,12 +59,12 @@ pub(crate) fn idct3_1d(input: &[f64], output: &mut [f64], table: &CosineTable) {
     debug_assert_eq!(input.len(), n);
     debug_assert_eq!(output.len(), n);
     let rcp_n = 1.0 / n as f64;
-    for i in 0..n {
+    for (i, out) in output.iter_mut().enumerate() {
         let mut sum = input[0]; // full DC term
-        for k in 1..n {
-            sum += 2.0 * input[k] * table.get(i, k);
+        for (k, &inp) in input.iter().enumerate().skip(1) {
+            sum += 2.0 * inp * table.get(i, k);
         }
-        output[i] = sum * rcp_n;
+        *out = sum * rcp_n;
     }
 }
 
@@ -163,12 +163,7 @@ pub(crate) fn idct3_2d(
 ///
 /// Applied separably: row frequency kr and column frequency kc are
 /// filtered independently and combined multiplicatively.
-fn spectral_filter(
-    coeffs: &mut [f64],
-    rows: usize,
-    cols: usize,
-    decay: f64,
-) {
+fn spectral_filter(coeffs: &mut [f64], rows: usize, cols: usize, decay: f64) {
     // Precompute row weights
     let row_weights: Vec<f64> = (0..cols)
         .map(|k| {
@@ -203,7 +198,7 @@ fn spectral_filter(
 /// 2. Forward 2D DCT-II.
 /// 3. Apply spectral filter (suppress high frequencies).
 /// 4. Inverse 2D DCT-III.
-/// 5. Re-project known values: restored[i] = mask[i]*original[i] + (1-mask[i])*reconstructed[i].
+/// 5. Re-project known values: `restored[i] = mask[i]*original[i] + (1-mask[i])*reconstructed[i]`.
 /// 6. Repeat 2-5 until convergence.
 pub fn restore_frequency(grid: &Grid2D, config: &FrequencyConfig) -> RestorationResult {
     let start = std::time::Instant::now();
@@ -275,7 +270,14 @@ pub fn restore_frequency(grid: &Grid2D, config: &FrequencyConfig) -> Restoration
         spectral_filter(&mut coeffs, rows, cols, config.spectral_decay);
 
         // Inverse DCT
-        idct3_2d(&coeffs, &mut reconstructed, rows, cols, &row_table, &col_table);
+        idct3_2d(
+            &coeffs,
+            &mut reconstructed,
+            rows,
+            cols,
+            &row_table,
+            &col_table,
+        );
 
         // Re-project known values and compute max change
         let mut max_change: f64 = 0.0;
@@ -470,8 +472,7 @@ mod tests {
     fn test_frequency_restores_smooth_field() {
         // 4x4 grid with checkerboard pattern, half missing
         let data = vec![
-            10.0, 0.0, 10.0, 0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0, 0.0, 0.0, 10.0, 0.0,
-            10.0,
+            10.0, 0.0, 10.0, 0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0, 0.0, 0.0, 10.0, 0.0, 10.0,
         ];
         let mask = vec![
             1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0,
@@ -482,12 +483,7 @@ mod tests {
 
         // All values should be close to 10 (constant field)
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!(
-                (v - 10.0).abs() < 3.0,
-                "index {} should be ~10: {}",
-                i,
-                v
-            );
+            assert!((v - 10.0).abs() < 3.0, "index {} should be ~10: {}", i, v);
         }
     }
 
@@ -521,5 +517,110 @@ mod tests {
                 rest
             );
         }
+    }
+
+    // -- 1D DCT: constant signal has energy in DC only -----------------------
+
+    #[test]
+    fn test_dct_1d_constant_signal_energy_in_dc() {
+        let n = 8;
+        let table = CosineTable::new(n);
+        let c = 7.0;
+        let input = vec![c; n];
+        let mut forward = vec![0.0; n];
+        dct2_1d(&input, &mut forward, &table);
+        // DC component should be c*N (sum of all cosines at k=0 = N)
+        assert!(
+            (forward[0] - c * n as f64).abs() < 1e-8,
+            "DC not correct: {}",
+            forward[0]
+        );
+        // All higher-frequency components should be ~0
+        for k in 1..n {
+            assert!(
+                forward[k].abs() < 1e-8,
+                "non-DC component at k={} should be 0: {}",
+                k,
+                forward[k]
+            );
+        }
+    }
+
+    // -- 1D DCT size-1 --------------------------------------------------------
+
+    #[test]
+    fn test_dct_1d_size_one() {
+        let table = CosineTable::new(1);
+        let input = vec![5.0];
+        let mut forward = vec![0.0; 1];
+        let mut inverse = vec![0.0; 1];
+        dct2_1d(&input, &mut forward, &table);
+        idct3_1d(&forward, &mut inverse, &table);
+        assert!((inverse[0] - 5.0).abs() < 1e-12);
+    }
+
+    // -- 2D DCT size 1x1 -------------------------------------------------------
+
+    #[test]
+    fn test_dct_2d_1x1() {
+        let row_table = CosineTable::new(1);
+        let col_table = CosineTable::new(1);
+        let input = vec![42.0];
+        let mut forward = vec![0.0; 1];
+        let mut inverse = vec![0.0; 1];
+        dct2_2d(&input, &mut forward, 1, 1, &row_table, &col_table);
+        idct3_2d(&forward, &mut inverse, 1, 1, &row_table, &col_table);
+        assert!((inverse[0] - 42.0).abs() < 1e-10);
+    }
+
+    // -- FrequencyConfig default values ---------------------------------------
+
+    #[test]
+    fn test_frequency_config_default() {
+        let c = FrequencyConfig::default();
+        assert_eq!(c.max_pocs_iterations, 50);
+        assert!((c.spectral_decay - 2.0).abs() < 1e-15);
+        assert!((c.convergence_threshold - 1e-6).abs() < 1e-15);
+        assert!((c.confidence_floor - 0.7).abs() < 1e-15);
+    }
+
+    // -- restore_frequency: single-row grid -----------------------------------
+
+    #[test]
+    fn test_frequency_single_row_grid() {
+        let data = vec![10.0, 0.0, 10.0, 0.0];
+        let mask = vec![1.0, 0.0, 1.0, 0.0];
+        let grid = Grid2D::new(1, 4, data, mask);
+        let config = FrequencyConfig::default();
+        let r = restore_frequency(&grid, &config);
+        assert_eq!(r.field.values.len(), 4);
+        // Known values should be preserved
+        assert!((r.field.values[0] - 10.0).abs() < 1e-6);
+        assert!((r.field.values[2] - 10.0).abs() < 1e-6);
+    }
+
+    // -- restore_frequency: all-missing initializes with mean -----------------
+
+    #[test]
+    fn test_frequency_all_missing_does_not_panic() {
+        let data = vec![0.0; 9];
+        let mask = vec![0.0; 9];
+        let grid = Grid2D::new(3, 3, data, mask);
+        let config = FrequencyConfig::default();
+        let r = restore_frequency(&grid, &config);
+        assert_eq!(r.field.values.len(), 9);
+    }
+
+    // -- restore_frequency: content hash is non-zero for non-trivial input ---
+
+    #[test]
+    fn test_frequency_content_hash_nonzero() {
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let mask = vec![1.0; 4];
+        let grid = Grid2D::new(2, 2, data, mask);
+        let config = FrequencyConfig::default();
+        let r = restore_frequency(&grid, &config);
+        assert_ne!(r.content_hash, 0);
+        assert_ne!(r.field.content_hash, 0);
     }
 }

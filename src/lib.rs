@@ -179,10 +179,7 @@ pub fn restore(fragment: &Fragment, config: &InversionConfig) -> RestorationResu
 }
 
 /// Batch restore multiple fragments (backward-compatible alias for `restore_1d_batch`).
-pub fn restore_batch(
-    fragments: &[Fragment],
-    config: &InversionConfig,
-) -> Vec<RestorationResult> {
+pub fn restore_batch(fragments: &[Fragment], config: &InversionConfig) -> Vec<RestorationResult> {
     solver_1d::restore_1d_batch(fragments, config)
 }
 
@@ -352,7 +349,13 @@ mod tests {
 
     #[test]
     fn test_fragment_new_basic() {
-        let f = Fragment::new(1, FragmentKind::Text, vec![1.0, 2.0, 3.0], vec![1.0, 1.0, 1.0], 0);
+        let f = Fragment::new(
+            1,
+            FragmentKind::Text,
+            vec![1.0, 2.0, 3.0],
+            vec![1.0, 1.0, 1.0],
+            0,
+        );
         assert_eq!(f.id, 1);
         assert_eq!(f.kind, FragmentKind::Text);
         assert_eq!(f.data.len(), 3);
@@ -590,8 +593,13 @@ mod tests {
 
     #[test]
     fn test_restore_batch_multiple() {
-        let f1 =
-            Fragment::new(10, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f1 = Fragment::new(
+            10,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let f2 = Fragment::new(11, FragmentKind::Image, vec![5.0, 5.0], vec![1.0, 1.0], 0);
         let config = InversionConfig::default();
         let results = restore_batch(&[f1, f2], &config);
@@ -609,8 +617,13 @@ mod tests {
 
     #[test]
     fn test_restore_hash_deterministic() {
-        let f =
-            Fragment::new(99, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f = Fragment::new(
+            99,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let config = InversionConfig::default();
         let r1 = restore(&f, &config);
         let r2 = restore(&f, &config);
@@ -654,8 +667,13 @@ mod tests {
 
     #[test]
     fn test_restoration_elapsed_ns() {
-        let f =
-            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f = Fragment::new(
+            0,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let config = InversionConfig::default();
         let r = restore(&f, &config);
         assert!(r.elapsed_ns < 10_000_000_000, "took too long");
@@ -665,8 +683,13 @@ mod tests {
 
     #[test]
     fn test_strategy_auto_selects_1d_without_grid() {
-        let f =
-            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f = Fragment::new(
+            0,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let config = InversionConfig::default();
         let r = restore_advanced(&f, &config, Strategy::Auto, None, None, None);
         assert_eq!(r.fragment_id, 0);
@@ -708,14 +731,7 @@ mod tests {
         ];
         let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
         let config = InversionConfig::default();
-        let r = restore_advanced(
-            &f,
-            &config,
-            Strategy::Frequency,
-            Some((4, 4)),
-            None,
-            None,
-        );
+        let r = restore_advanced(&f, &config, Strategy::Frequency, Some((4, 4)), None, None);
         assert_eq!(r.field.values.len(), 16);
     }
 
@@ -725,14 +741,7 @@ mod tests {
         let mask = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let f = Fragment::new(0, FragmentKind::Text, data, mask, 0);
         let config = InversionConfig::default();
-        let r = restore_advanced(
-            &f,
-            &config,
-            Strategy::Sparse,
-            Some((3, 3)),
-            None,
-            None,
-        );
+        let r = restore_advanced(&f, &config, Strategy::Sparse, Some((3, 3)), None, None);
         assert_eq!(r.field.values.len(), 9);
     }
 
@@ -777,8 +786,13 @@ mod tests {
 
     #[test]
     fn test_strategy_fallback_without_grid_dims() {
-        let f =
-            Fragment::new(0, FragmentKind::Text, vec![1.0, 0.0, 3.0], vec![1.0, 0.0, 1.0], 0);
+        let f = Fragment::new(
+            0,
+            FragmentKind::Text,
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 0.0, 1.0],
+            0,
+        );
         let config = InversionConfig::default();
         let r = restore_advanced(&f, &config, Strategy::Grid2D, None, None, None);
         assert_eq!(r.field.values.len(), 3);

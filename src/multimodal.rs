@@ -152,11 +152,7 @@ pub fn fuse_grid(
         };
     }
 
-    assert_eq!(
-        modal_obs.len(),
-        n,
-        "modal_obs length must match grid size"
-    );
+    assert_eq!(modal_obs.len(), n, "modal_obs length must match grid size");
 
     let entropy_before = measure_entropy(&grid.data, 64).shannon_entropy;
 
@@ -192,9 +188,9 @@ pub fn fuse_grid(
     let mut final_values = spatial_result.field.values;
 
     // Re-project original known values
-    for i in 0..n {
+    for (i, fv) in final_values.iter_mut().enumerate() {
         if grid.mask[i] == 1.0 {
-            final_values[i] = grid.data[i];
+            *fv = grid.data[i];
         }
     }
 
@@ -405,12 +401,7 @@ mod tests {
         let r = fuse_grid(&grid, &obs, &config);
 
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!(
-                (v - 50.0).abs() < 2.0,
-                "index {} should be ~50: {}",
-                i,
-                v
-            );
+            assert!((v - 50.0).abs() < 2.0, "index {} should be ~50: {}", i, v);
         }
     }
 
@@ -514,6 +505,136 @@ mod tests {
             (result.mean - 42.0).abs() < 0.01,
             "zero variance should dominate: {}",
             result.mean
+        );
+    }
+
+    // -- ModalityKind: all variants construct without panic ------------------
+
+    #[test]
+    fn test_all_modality_kinds() {
+        let kinds = [
+            ModalityKind::Image,
+            ModalityKind::Text,
+            ModalityKind::Spatial,
+            ModalityKind::Spectral,
+            ModalityKind::Temporal,
+        ];
+        let config = FusionConfig {
+            prior_variance: 1e12,
+            ..FusionConfig::default()
+        };
+        for &kind in &kinds {
+            let obs = vec![ModalObservation {
+                mean: 5.0,
+                variance: 1.0,
+                modality: kind,
+            }];
+            let result = bayesian_fuse(&obs, &config);
+            assert!(
+                (result.mean - 5.0).abs() < 0.1,
+                "modality {:?} gave {}",
+                kind,
+                result.mean
+            );
+        }
+    }
+
+    // -- FusionConfig default values -----------------------------------------
+
+    #[test]
+    fn test_fusion_config_default() {
+        let c = FusionConfig::default();
+        assert!((c.prior_mean - 0.0).abs() < 1e-15);
+        assert!((c.prior_variance - 1e6).abs() < 1.0);
+        assert_eq!(c.max_iterations, 100);
+        assert!((c.convergence_threshold - 1e-8).abs() < 1e-15);
+        assert!((c.confidence_floor - 0.7).abs() < 1e-15);
+    }
+
+    // -- bayesian_fuse: fused variance strictly less than any modality's variance --
+
+    #[test]
+    fn test_fuse_variance_decreases() {
+        let variance_a = 4.0;
+        let variance_b = 9.0;
+        let obs = vec![
+            ModalObservation {
+                mean: 0.0,
+                variance: variance_a,
+                modality: ModalityKind::Image,
+            },
+            ModalObservation {
+                mean: 0.0,
+                variance: variance_b,
+                modality: ModalityKind::Text,
+            },
+        ];
+        let config = FusionConfig {
+            prior_variance: 1e12,
+            ..FusionConfig::default()
+        };
+        let result = bayesian_fuse(&obs, &config);
+        assert!(
+            result.variance < variance_a,
+            "fused variance {} should be less than {} ",
+            result.variance,
+            variance_a
+        );
+        assert!(
+            result.variance < variance_b,
+            "fused variance {} should be less than {}",
+            result.variance,
+            variance_b
+        );
+    }
+
+    // -- fuse_grid: known original values dominate over modality observations --
+
+    #[test]
+    fn test_fuse_grid_known_values_override_modality() {
+        // Grid with one known cell; modality says something different for that cell
+        let mut data = vec![0.0; 4];
+        let mut mask = vec![0.0; 4];
+        data[0] = 99.0;
+        mask[0] = 1.0;
+
+        let grid = Grid2D::new(2, 2, data, mask);
+
+        // Give modality observation at position 0 (known) saying 0.0
+        let mut obs: Vec<Vec<ModalObservation>> = vec![Vec::new(); 4];
+        obs[0] = vec![ModalObservation {
+            mean: 0.0,
+            variance: 0.0001,
+            modality: ModalityKind::Image,
+        }];
+        obs[1] = vec![ModalObservation {
+            mean: 99.0,
+            variance: 1.0,
+            modality: ModalityKind::Image,
+        }];
+        obs[2] = vec![ModalObservation {
+            mean: 99.0,
+            variance: 1.0,
+            modality: ModalityKind::Image,
+        }];
+        obs[3] = vec![ModalObservation {
+            mean: 99.0,
+            variance: 1.0,
+            modality: ModalityKind::Image,
+        }];
+
+        let config = FusionConfig {
+            prior_variance: 1e12,
+            ..FusionConfig::default()
+        };
+        let r = fuse_grid(&grid, &obs, &config);
+
+        // The original known value (99.0 at index 0) should be preserved,
+        // regardless of modality observation
+        assert!(
+            (r.field.values[0] - 99.0).abs() < 1e-6,
+            "known value should override modality: {}",
+            r.field.values[0]
         );
     }
 }

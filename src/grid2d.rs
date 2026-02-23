@@ -532,4 +532,138 @@ mod tests {
         let grid = make_grid(2, 2, vec![0.0; 4], vec![1.0, 0.0, 1.0, 0.0]);
         assert!((grid.known_fraction() - 0.5).abs() < 1e-12);
     }
+
+    // -- Known fraction edge cases --------------------------------------------
+
+    #[test]
+    fn test_2d_known_fraction_empty() {
+        let grid = make_grid(0, 0, vec![], vec![]);
+        assert!((grid.known_fraction() - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_2d_known_fraction_all_missing() {
+        let grid = make_grid(3, 3, vec![0.0; 9], vec![0.0; 9]);
+        assert!((grid.known_fraction() - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_2d_known_fraction_all_known() {
+        let grid = make_grid(3, 3, vec![1.0; 9], vec![1.0; 9]);
+        assert!((grid.known_fraction() - 1.0).abs() < 1e-12);
+    }
+
+    // -- 1x1 grid -------------------------------------------------------------
+
+    #[test]
+    fn test_2d_1x1_known() {
+        let grid = make_grid(1, 1, vec![7.0], vec![1.0]);
+        let config = Grid2DConfig::default();
+        let r = restore_2d(&grid, &config);
+        assert_eq!(r.field.values.len(), 1);
+        assert!((r.field.values[0] - 7.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_2d_1x1_missing() {
+        let grid = make_grid(1, 1, vec![0.0], vec![0.0]);
+        let config = Grid2DConfig::default();
+        let r = restore_2d(&grid, &config);
+        assert_eq!(r.field.values.len(), 1);
+        // Single missing cell with no neighbors: stays at mean_known = 0
+        assert!((r.field.values[0]).abs() < 1e-10);
+    }
+
+    // -- Single-column grid ---------------------------------------------------
+
+    #[test]
+    fn test_2d_single_column_interpolation() {
+        let data = vec![0.0, 0.0, 100.0];
+        let mask = vec![1.0, 0.0, 1.0];
+        let grid = make_grid(3, 1, data, mask);
+        let config = Grid2DConfig::default();
+        let r = restore_2d(&grid, &config);
+        assert_eq!(r.field.values.len(), 3);
+        assert!((r.field.values[0] - 0.0).abs() < 1e-12);
+        assert!((r.field.values[2] - 100.0).abs() < 1e-12);
+        // Middle should be between 0 and 100
+        assert!(r.field.values[1] > 0.0 && r.field.values[1] < 100.0);
+    }
+
+    // -- All-missing 2D grid --------------------------------------------------
+
+    #[test]
+    fn test_2d_all_missing_stays_at_zero() {
+        let grid = make_grid(3, 3, vec![0.0; 9], vec![0.0; 9]);
+        let config = Grid2DConfig::default();
+        let r = restore_2d(&grid, &config);
+        for &v in &r.field.values {
+            assert!(
+                v.abs() < 1e-10,
+                "all-missing 2D should stay near 0, got {}",
+                v
+            );
+        }
+    }
+
+    // -- Batch empty ----------------------------------------------------------
+
+    #[test]
+    fn test_2d_batch_empty() {
+        let config = Grid2DConfig::default();
+        let results = restore_2d_batch(&[], &config);
+        assert!(results.is_empty());
+    }
+
+    // -- Content hash is deterministic ----------------------------------------
+
+    #[test]
+    fn test_2d_content_hash_deterministic() {
+        let data = vec![10.0, 0.0, 30.0, 40.0];
+        let mask = vec![1.0, 0.0, 1.0, 1.0];
+        let grid = make_grid(2, 2, data, mask);
+        let config = Grid2DConfig::default();
+        let r1 = restore_2d(&grid, &config);
+        let r2 = restore_2d(&grid, &config);
+        assert_eq!(r1.field.content_hash, r2.field.content_hash);
+        assert_eq!(r1.content_hash, r2.content_hash);
+    }
+
+    // -- Neighbor gathering: corner positions ---------------------------------
+
+    #[test]
+    fn test_gather_4_top_left_corner() {
+        // 3x3 grid, top-left corner (r=0, c=0): only 2 neighbors (right, down)
+        let data: Vec<f64> = (0..9).map(|i| i as f64).collect();
+        let (sum, count) = gather_4(0, 0, 3, 3, &data);
+        // Neighbors: right=data[1]=1, down=data[3]=3
+        assert_eq!(count, 2);
+        assert!((sum - (1.0 + 3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_gather_4_center() {
+        // 3x3 grid, center (r=1, c=1): 4 neighbors
+        let data: Vec<f64> = (0..9).map(|i| i as f64).collect();
+        let (sum, count) = gather_4(1, 1, 3, 3, &data);
+        // Neighbors: up=data[1]=1, down=data[7]=7, left=data[3]=3, right=data[5]=5
+        assert_eq!(count, 4);
+        assert!((sum - (1.0 + 7.0 + 3.0 + 5.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_gather_8_corner_count() {
+        // Top-left corner: 3 neighbors in 8-connectivity
+        let data: Vec<f64> = (0..9).map(|i| i as f64).collect();
+        let (_sum, count) = gather_8(0, 0, 3, 3, &data);
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_gather_8_center_count() {
+        // Center: 8 neighbors in 8-connectivity
+        let data: Vec<f64> = (0..9).map(|i| i as f64).collect();
+        let (_sum, count) = gather_8(1, 1, 3, 3, &data);
+        assert_eq!(count, 8);
+    }
 }

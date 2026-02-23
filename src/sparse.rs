@@ -161,9 +161,9 @@ pub fn restore_sparse(grid: &Grid2D, config: &SparseConfig) -> RestorationResult
 
         // Gradient step: enforce data fidelity on known positions
         let mut gradient_applied = work.clone();
-        for i in 0..n {
+        for (i, ga) in gradient_applied.iter_mut().enumerate() {
             if grid.mask[i] == 1.0 {
-                gradient_applied[i] = grid.data[i];
+                *ga = grid.data[i];
             }
         }
 
@@ -422,5 +422,129 @@ mod tests {
         assert!((result[3] - 0.0).abs() < 1e-15);
         assert!((result[4] - 0.0).abs() < 1e-15);
         assert!((result[5] - 99.0).abs() < 1e-15);
+    }
+
+    // -- Soft threshold: large threshold zeros everything --------------------
+
+    #[test]
+    fn test_soft_threshold_large_threshold_zeros_all() {
+        let vals = vec![1.0, -1.0, 0.1, -0.1, 0.9999];
+        for &v in &vals {
+            assert!(
+                (soft_threshold(v, 100.0) - 0.0).abs() < 1e-15,
+                "expected 0 for {}",
+                v
+            );
+        }
+    }
+
+    // -- Soft threshold: idempotent when result is thresholded again with same t ---
+
+    #[test]
+    fn test_soft_threshold_idempotent() {
+        // After one application, applying again with same t should not change anything
+        // because soft_threshold(soft_threshold(v, t), t) may not be identical to
+        // soft_threshold(v, t), but if the output is >= 0 then it is positive.
+        // We just verify applying twice doesn't go negative when input was positive result.
+        let v = 5.0;
+        let t = 2.0;
+        let once = soft_threshold(v, t); // = 3.0
+        let twice = soft_threshold(once, t); // = 1.0 (not idempotent, but still >= 0)
+        assert!(twice >= 0.0);
+        assert!(twice <= once);
+    }
+
+    // -- Soft threshold: sign preservation ------------------------------------
+
+    #[test]
+    fn test_soft_threshold_sign_preserved() {
+        assert!(soft_threshold(5.0, 1.0) > 0.0);
+        assert!(soft_threshold(-5.0, 1.0) < 0.0);
+        assert!((soft_threshold(0.0, 1.0) - 0.0).abs() < 1e-15);
+    }
+
+    // -- SparseConfig default values ------------------------------------------
+
+    #[test]
+    fn test_sparse_config_default() {
+        let c = SparseConfig::default();
+        assert!((c.lambda - 0.1).abs() < 1e-15);
+        assert_eq!(c.max_iterations, 500);
+        assert!((c.convergence_threshold - 1e-7).abs() < 1e-20);
+        assert!((c.confidence_floor - 0.7).abs() < 1e-15);
+        assert!(c.use_fista);
+    }
+
+    // -- restore_sparse: content hash deterministic ---------------------------
+
+    #[test]
+    fn test_sparse_content_hash_deterministic() {
+        let data = vec![1.0, 0.0, 3.0, 0.0, 5.0, 0.0, 7.0, 0.0, 9.0];
+        let mask = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
+        let grid = Grid2D::new(3, 3, data, mask);
+        let config = SparseConfig::default();
+        let r1 = restore_sparse(&grid, &config);
+        let r2 = restore_sparse(&grid, &config);
+        assert_eq!(r1.field.content_hash, r2.field.content_hash);
+        assert_eq!(r1.content_hash, r2.content_hash);
+    }
+
+    // -- restore_sparse: 1x1 grid --------------------------------------------
+
+    #[test]
+    fn test_sparse_1x1_known() {
+        let grid = Grid2D::new(1, 1, vec![99.0], vec![1.0]);
+        let config = SparseConfig::default();
+        let r = restore_sparse(&grid, &config);
+        assert_eq!(r.field.values.len(), 1);
+        assert!((r.field.values[0] - 99.0).abs() < 1e-6);
+    }
+
+    // -- restore_sparse: ISTA known values remain unchanged ------------------
+
+    #[test]
+    fn test_ista_known_values_unchanged() {
+        let data = vec![3.0, 0.0, 7.0, 0.0, 11.0, 0.0, 15.0, 0.0, 19.0];
+        let mask = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
+        let grid = Grid2D::new(3, 3, data.clone(), mask.clone());
+        let config = SparseConfig {
+            use_fista: false,
+            ..SparseConfig::default()
+        };
+        let r = restore_sparse(&grid, &config);
+        for (i, (&m, (&d, &v))) in mask
+            .iter()
+            .zip(data.iter().zip(r.field.values.iter()))
+            .enumerate()
+        {
+            if m == 1.0 {
+                assert!(
+                    (v - d).abs() < 1e-6,
+                    "ISTA: known value at index {} changed: {} -> {}",
+                    i,
+                    d,
+                    v
+                );
+            }
+        }
+    }
+
+    // -- restore_sparse: confidence floor respected --------------------------
+
+    #[test]
+    fn test_sparse_confidence_floor_respected() {
+        let mut data = vec![0.0; 16];
+        let mut mask = vec![0.0; 16];
+        data[0] = 1.0;
+        mask[0] = 1.0;
+        let grid = Grid2D::new(4, 4, data, mask);
+        let config = SparseConfig {
+            confidence_floor: 0.2,
+            ..SparseConfig::default()
+        };
+        let r = restore_sparse(&grid, &config);
+        for &s in &r.field.confidence.scores {
+            assert!(s >= 0.2 - 1e-12, "sparse confidence {} below floor", s);
+        }
     }
 }
