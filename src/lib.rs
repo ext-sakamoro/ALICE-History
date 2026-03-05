@@ -2,6 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Moroya Sakamoto
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    clippy::similar_names,
+    clippy::many_single_char_names,
+    clippy::module_name_repetitions,
+    clippy::inline_always,
+    clippy::too_many_lines,
+    clippy::float_cmp
+)]
+
 // ---------------------------------------------------------------------------
 // Modules
 // ---------------------------------------------------------------------------
@@ -116,6 +130,7 @@ impl Fragment {
     ///
     /// # Panics
     /// Panics if `data.len() != mask.len()`.
+    #[must_use]
     pub fn new(
         id: u64,
         kind: FragmentKind,
@@ -140,6 +155,7 @@ impl Fragment {
     }
 
     /// Fraction of data that is known (mean of mask).
+    #[must_use]
     pub fn known_fraction(&self) -> f64 {
         if self.mask.is_empty() {
             return 0.0;
@@ -149,6 +165,7 @@ impl Fragment {
     }
 
     /// Number of missing (mask == 0.0) elements.
+    #[must_use]
     pub fn missing_count(&self) -> usize {
         self.mask.iter().filter(|&&m| m == 0.0).count()
     }
@@ -174,11 +191,13 @@ impl Default for InversionConfig {
 // ---------------------------------------------------------------------------
 
 /// Restore a 1D fragment (backward-compatible alias for `restore_1d`).
+#[must_use]
 pub fn restore(fragment: &Fragment, config: &InversionConfig) -> RestorationResult {
     solver_1d::restore_1d(fragment, config)
 }
 
 /// Batch restore multiple fragments (backward-compatible alias for `restore_1d_batch`).
+#[must_use]
 pub fn restore_batch(fragments: &[Fragment], config: &InversionConfig) -> Vec<RestorationResult> {
     solver_1d::restore_1d_batch(fragments, config)
 }
@@ -219,8 +238,9 @@ pub enum Strategy {
 /// ## Auto strategy logic
 /// - `grid_dims` present + `known_fraction < 0.1` -> Sparse (FISTA)
 /// - `grid_dims` present + `known_fraction < 0.5` -> Frequency (DCT+POCS)
-/// - `grid_dims` present -> Grid2D (Gauss-Seidel)
-/// - Otherwise -> Linear1D
+/// - `grid_dims` present -> `Grid2D` (Gauss-Seidel)
+/// - Otherwise -> `Linear1D`
+#[must_use]
 pub fn restore_advanced(
     fragment: &Fragment,
     config: &InversionConfig,

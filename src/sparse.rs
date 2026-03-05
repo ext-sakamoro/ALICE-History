@@ -48,6 +48,7 @@ impl Default for SparseConfig {
 ///   if v > t     => v - t
 ///   if v < -t    => v + t
 #[inline]
+#[must_use]
 pub fn soft_threshold(v: f64, t: f64) -> f64 {
     let abs_v = v.abs();
     let shrunk = abs_v - t;
@@ -73,6 +74,7 @@ pub fn soft_threshold(v: f64, t: f64) -> f64 {
 ///    e. Re-project known values.
 ///    f. (FISTA only) Nesterov momentum update.
 /// 3. Check convergence.
+#[must_use]
 pub fn restore_sparse(grid: &Grid2D, config: &SparseConfig) -> RestorationResult {
     let start = std::time::Instant::now();
     let rows = grid.rows;
@@ -178,7 +180,7 @@ pub fn restore_sparse(grid: &Grid2D, config: &SparseConfig) -> RestorationResult
         );
 
         // Soft threshold in DCT domain (enforce sparsity)
-        for c in coeffs.iter_mut() {
+        for c in &mut coeffs {
             *c = soft_threshold(*c, threshold);
         }
 

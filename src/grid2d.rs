@@ -23,10 +23,11 @@ pub struct Grid2D {
 }
 
 impl Grid2D {
-    /// Create a new Grid2D.
+    /// Create a new `Grid2D`.
     ///
     /// # Panics
     /// Panics if `data.len() != rows * cols` or `mask.len() != rows * cols`.
+    #[must_use]
     pub fn new(rows: usize, cols: usize, data: Vec<f64>, mask: Vec<f64>) -> Self {
         let n = rows * cols;
         assert_eq!(data.len(), n, "data length must equal rows * cols");
@@ -40,6 +41,7 @@ impl Grid2D {
     }
 
     /// Fraction of cells that are known.
+    #[must_use]
     pub fn known_fraction(&self) -> f64 {
         let n = self.data.len();
         if n == 0 {
@@ -91,7 +93,8 @@ impl Default for Grid2DConfig {
 /// 1. Initialize missing cells with the mean of known cells.
 /// 2. For each iteration, update each missing cell to the weighted average of
 ///    its neighbors, with Tikhonov regularization pulling toward the global mean.
-/// 3. Check convergence (max_change < threshold).
+/// 3. Check convergence (`max_change` < threshold).
+#[must_use]
 pub fn restore_2d(grid: &Grid2D, config: &Grid2DConfig) -> RestorationResult {
     let start = std::time::Instant::now();
     let n = grid.rows * grid.cols;
@@ -169,7 +172,7 @@ pub fn restore_2d(grid: &Grid2D, config: &Grid2DConfig) -> RestorationResult {
                 }
 
                 // precomputed reciprocal — replaces division per cell per iteration
-                let neighbor_avg = sum * (count as f64).recip();
+                let neighbor_avg = sum * f64::from(count).recip();
                 let smooth_grad = restored[idx] - neighbor_avg;
                 let reg_grad = config.regularization * (restored[idx] - mean_known);
                 let grad = smooth_grad + reg_grad;
@@ -211,6 +214,7 @@ pub fn restore_2d(grid: &Grid2D, config: &Grid2DConfig) -> RestorationResult {
 }
 
 /// Batch restore multiple 2D grids in parallel (Rayon).
+#[must_use]
 pub fn restore_2d_batch(grids: &[Grid2D], config: &Grid2DConfig) -> Vec<RestorationResult> {
     grids.par_iter().map(|g| restore_2d(g, config)).collect()
 }

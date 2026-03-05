@@ -66,10 +66,11 @@ pub struct FusedEstimate {
 /// Fuse multiple observations at a single position using Bayesian precision-weighted average.
 ///
 /// ## Algorithm
-/// - Each modality i provides (mu_i, sigma_i^2).
-/// - Precision_i = 1 / sigma_i^2.
-/// - Fused precision = prior_precision + sum(precision_i).
-/// - Fused mean = fused_variance * (prior_precision * prior_mean + sum(precision_i * mu_i)).
+/// - Each modality i provides (`mu_i`, `sigma_i^2`).
+/// - `Precision_i` = 1 / `sigma_i^2`.
+/// - Fused precision = `prior_precision` + `sum(precision_i)`.
+/// - Fused mean = `fused_variance` * (`prior_precision` * `prior_mean` + `sum(precision_i` * `mu_i`)).
+#[must_use]
 pub fn bayesian_fuse(observations: &[ModalObservation], config: &FusionConfig) -> FusedEstimate {
     if observations.is_empty() {
         return FusedEstimate {
@@ -120,6 +121,11 @@ pub fn bayesian_fuse(observations: &[ModalObservation], config: &FusionConfig) -
 ///
 /// `modal_obs[i]` contains the observations for grid position i.
 /// Positions with no observations remain as gaps to be filled by spatial interpolation.
+///
+/// # Panics
+///
+/// Panics if `modal_obs.len()` does not equal `grid.rows * grid.cols`.
+#[must_use]
 pub fn fuse_grid(
     grid: &Grid2D,
     modal_obs: &[Vec<ModalObservation>],

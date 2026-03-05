@@ -6,6 +6,16 @@ authors = ["Moroya Sakamoto"]
 description = "Inverse entropy restoration — reversing information degradation to recover original historical data"
 license = "AGPL-3.0-or-later"
 
+[lib]
+name = "alice_history"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["std"]
+std = []
+ffi = ["std"]
+
 [dependencies]
 rayon = "1"
 

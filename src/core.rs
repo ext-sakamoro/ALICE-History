@@ -14,7 +14,7 @@ pub(crate) const FNV_PRIME: u64 = 0x0100_0000_01b3;
 pub(crate) fn fnv1a(data: &[u8]) -> u64 {
     let mut h = FNV_OFFSET;
     for &b in data {
-        h ^= b as u64;
+        h ^= u64::from(b);
         h = h.wrapping_mul(FNV_PRIME);
     }
     h
@@ -59,8 +59,8 @@ pub fn measure_entropy(data: &[f64], bins: usize) -> EntropyMeasurement {
         };
     }
 
-    let min_val = data.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_val = data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_val = data.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_val = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
     let range = max_val - min_val;
     let mut counts = vec![0usize; bins];
@@ -107,7 +107,7 @@ pub fn measure_entropy(data: &[f64], bins: usize) -> EntropyMeasurement {
 // Confidence computation (1D)
 // ---------------------------------------------------------------------------
 
-/// Compute a 1D ConfidenceMap based on distance from known values.
+/// Compute a 1D `ConfidenceMap` based on distance from known values.
 ///
 /// Known elements receive confidence 1.0; missing elements receive a value
 /// that decays with distance (1 / (1 + distance)), clamped above `floor`.
@@ -157,7 +157,7 @@ pub(crate) fn compute_confidence(
 
     let rcp_n = 1.0 / n as f64; // precomputed reciprocal for mean
     let mean = scores.iter().sum::<f64>() * rcp_n;
-    let min = scores.iter().cloned().fold(f64::INFINITY, f64::min);
+    let min = scores.iter().copied().fold(f64::INFINITY, f64::min);
 
     ConfidenceMap {
         scores,
@@ -171,7 +171,7 @@ pub(crate) fn compute_confidence(
 // 2D Confidence computation (Manhattan distance approximation)
 // ---------------------------------------------------------------------------
 
-/// Compute a 2D ConfidenceMap using two-pass Manhattan distance approximation.
+/// Compute a 2D `ConfidenceMap` using two-pass Manhattan distance approximation.
 ///
 /// Pass 1 (top-left → bottom-right): d(r,c) = min(d(r,c), d(r-1,c)+1, d(r,c-1)+1)
 /// Pass 2 (bottom-right → top-left): d(r,c) = min(d(r,c), d(r+1,c)+1, d(r,c+1)+1)
@@ -249,7 +249,7 @@ pub(crate) fn compute_confidence_2d(
 
     let rcp_n = 1.0 / n as f64; // precomputed reciprocal for mean
     let mean = scores.iter().sum::<f64>() * rcp_n;
-    let min = scores.iter().cloned().fold(f64::INFINITY, f64::min);
+    let min = scores.iter().copied().fold(f64::INFINITY, f64::min);
 
     ConfidenceMap {
         scores,
@@ -263,7 +263,7 @@ pub(crate) fn compute_confidence_2d(
 // Result hash helper
 // ---------------------------------------------------------------------------
 
-/// Compute a result-level content hash from fragment_id + field content_hash.
+/// Compute a result-level content hash from `fragment_id` + field `content_hash`.
 pub(crate) fn result_content_hash(fragment_id: u64, field_hash: u64) -> u64 {
     let mut buf = Vec::with_capacity(16);
     buf.extend_from_slice(&fragment_id.to_le_bytes());

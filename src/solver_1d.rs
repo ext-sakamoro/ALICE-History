@@ -29,6 +29,7 @@ use crate::{ConfidenceMap, Fragment, InversionConfig, RestorationField, Restorat
 ///    - Check convergence (`max_change < threshold`).
 /// 3. Compute confidence: higher for values near known data, lower for values
 ///    far from known data.
+#[must_use]
 pub fn restore_1d(fragment: &Fragment, config: &InversionConfig) -> RestorationResult {
     let start = std::time::Instant::now();
     let n = fragment.data.len();
@@ -147,6 +148,7 @@ pub fn restore_1d(fragment: &Fragment, config: &InversionConfig) -> RestorationR
 }
 
 /// Batch restore multiple fragments using the 1D solver in parallel (Rayon).
+#[must_use]
 pub fn restore_1d_batch(
     fragments: &[Fragment],
     config: &InversionConfig,

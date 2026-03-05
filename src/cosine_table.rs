@@ -22,7 +22,7 @@ pub(crate) struct CosineTable {
 }
 
 impl CosineTable {
-    /// Create a new CosineTable of given size.
+    /// Create a new `CosineTable` of given size.
     ///
     /// Precomputes all cos(PI * (2*n + 1) * k / (2*N)) values.
     pub fn new(size: usize) -> Self {
@@ -109,7 +109,10 @@ mod tests {
         // cos(PI * (2n+1) * 0 / (2N)) = cos(0) = 1.0
         let ct = CosineTable::new(32);
         for n in 0..32 {
-            assert!((ct.get(n, 0) - 1.0).abs() < 1e-15, "k=0 should always be 1.0");
+            assert!(
+                (ct.get(n, 0) - 1.0).abs() < 1e-15,
+                "k=0 should always be 1.0"
+            );
         }
     }
 
@@ -156,5 +159,54 @@ mod tests {
         assert!((ct.table[0] - ct.get(0, 0)).abs() < 1e-15);
         assert!((ct.table[3] - ct.get(0, 3)).abs() < 1e-15);
         assert!((ct.table[4] - ct.get(1, 0)).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_cosine_table_size_two() {
+        // N=2: cos(PI*(2n+1)*k/4)
+        // n=0,k=0: cos(0)=1, n=0,k=1: cos(PI/4)=sqrt(2)/2
+        // n=1,k=0: cos(0)=1, n=1,k=1: cos(3*PI/4)=-sqrt(2)/2
+        let ct = CosineTable::new(2);
+        assert_eq!(ct.size, 2);
+        assert_eq!(ct.table.len(), 4);
+        let sqrt2_over2 = (2.0f64).sqrt() * 0.5;
+        assert!((ct.get(0, 0) - 1.0).abs() < 1e-14);
+        assert!((ct.get(0, 1) - sqrt2_over2).abs() < 1e-14);
+        assert!((ct.get(1, 0) - 1.0).abs() < 1e-14);
+        assert!((ct.get(1, 1) - (-sqrt2_over2)).abs() < 1e-14);
+    }
+
+    #[test]
+    fn test_cosine_table_values_bounded() {
+        // All cosine values must be in [-1.0, 1.0]
+        let ct = CosineTable::new(32);
+        for &v in &ct.table {
+            assert!(
+                v >= -1.0 - 1e-12 && v <= 1.0 + 1e-12,
+                "cosine out of bounds: {}",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_cosine_table_energy_conservation() {
+        // For a DCT basis vector: sum of squares over n = N/2 (for k > 0)
+        let n_size = 8;
+        let ct = CosineTable::new(n_size);
+        // k=0: sum_n cos(...)^2 = N (all ones), energy = N
+        let energy_dc: f64 = (0..n_size).map(|n| ct.get(n, 0).powi(2)).sum();
+        assert!(
+            (energy_dc - n_size as f64).abs() < 1e-10,
+            "DC energy = {}",
+            energy_dc
+        );
+        // k=1: sum_n cos(...)^2 = N/2
+        let energy_k1: f64 = (0..n_size).map(|n| ct.get(n, 1).powi(2)).sum();
+        assert!(
+            (energy_k1 - n_size as f64 / 2.0).abs() < 1e-10,
+            "k=1 energy = {}",
+            energy_k1
+        );
     }
 }

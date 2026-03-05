@@ -37,7 +37,7 @@ impl Default for FrequencyConfig {
 
 /// Forward DCT-II of a 1D signal using the precomputed cosine table.
 ///
-/// X[k] = sum_n x[n] * cos(pi * (2n+1) * k / (2N))
+/// X[k] = `sum_n` x[n] * cos(pi * (2n+1) * k / (2N))
 pub(crate) fn dct2_1d(input: &[f64], output: &mut [f64], table: &CosineTable) {
     let n = table.size;
     debug_assert_eq!(input.len(), n);
@@ -74,7 +74,7 @@ pub(crate) fn idct3_1d(input: &[f64], output: &mut [f64], table: &CosineTable) {
 
 /// Forward 2D DCT-II via separable 1D transforms (rows then columns).
 ///
-/// Uses row_table for the column dimension and col_table for the row dimension.
+/// Uses `row_table` for the column dimension and `col_table` for the row dimension.
 pub(crate) fn dct2_2d(
     input: &[f64],
     output: &mut [f64],
@@ -200,6 +200,7 @@ fn spectral_filter(coeffs: &mut [f64], rows: usize, cols: usize, decay: f64) {
 /// 4. Inverse 2D DCT-III.
 /// 5. Re-project known values: `restored[i] = mask[i]*original[i] + (1-mask[i])*reconstructed[i]`.
 /// 6. Repeat 2-5 until convergence.
+#[must_use]
 pub fn restore_frequency(grid: &Grid2D, config: &FrequencyConfig) -> RestorationResult {
     let start = std::time::Instant::now();
     let rows = grid.rows;
