@@ -11,7 +11,7 @@ use std::f64::consts::PI;
 ///
 /// Row-major layout ensures cache-friendly access during row-direction DCT,
 /// where we iterate over k for a fixed n.
-pub(crate) struct CosineTable {
+pub struct CosineTable {
     /// Table size (N).
     pub size: usize,
     /// Precomputed reciprocal: 1.0 / (2 * N), computed once at construction.
@@ -94,11 +94,7 @@ mod tests {
                 let got = ct.get(n, k);
                 assert!(
                     (got - expected).abs() < 1e-12,
-                    "mismatch at n={}, k={}: {} vs {}",
-                    n,
-                    k,
-                    got,
-                    expected
+                    "mismatch at n={n}, k={k}: {got} vs {expected}"
                 );
             }
         }
@@ -133,10 +129,7 @@ mod tests {
                 }
                 assert!(
                     dot.abs() < 1e-10,
-                    "orthogonality failed for k={}, j={}: dot={}",
-                    k,
-                    j,
-                    dot
+                    "orthogonality failed for k={k}, j={j}: dot={dot}"
                 );
             }
         }
@@ -182,9 +175,8 @@ mod tests {
         let ct = CosineTable::new(32);
         for &v in &ct.table {
             assert!(
-                v >= -1.0 - 1e-12 && v <= 1.0 + 1e-12,
-                "cosine out of bounds: {}",
-                v
+                (-1.0 - 1e-12..=1.0 + 1e-12).contains(&v),
+                "cosine out of bounds: {v}"
             );
         }
     }
@@ -198,15 +190,13 @@ mod tests {
         let energy_dc: f64 = (0..n_size).map(|n| ct.get(n, 0).powi(2)).sum();
         assert!(
             (energy_dc - n_size as f64).abs() < 1e-10,
-            "DC energy = {}",
-            energy_dc
+            "DC energy = {energy_dc}"
         );
         // k=1: sum_n cos(...)^2 = N/2
         let energy_k1: f64 = (0..n_size).map(|n| ct.get(n, 1).powi(2)).sum();
         assert!(
             (energy_k1 - n_size as f64 / 2.0).abs() < 1e-10,
-            "k=1 energy = {}",
-            energy_k1
+            "k=1 energy = {energy_k1}"
         );
     }
 }

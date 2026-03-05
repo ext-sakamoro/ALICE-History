@@ -22,6 +22,8 @@
 
 pub(crate) mod core;
 pub(crate) mod cosine_table;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod frequency;
 pub mod grid2d;
 pub mod multimodal;
@@ -347,7 +349,7 @@ fn fragment_to_grid(fragment: &Fragment, rows: usize, cols: usize) -> grid2d::Gr
     grid2d::Grid2D::new(rows, cols, data, mask)
 }
 
-fn inversion_to_grid2d_config(config: &InversionConfig) -> Grid2DConfig {
+const fn inversion_to_grid2d_config(config: &InversionConfig) -> Grid2DConfig {
     Grid2DConfig {
         max_iterations: config.max_iterations,
         convergence_threshold: config.convergence_threshold,
@@ -405,7 +407,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "data and mask must have the same length")]
     fn test_fragment_mismatched_lengths() {
-        Fragment::new(0, FragmentKind::Text, vec![1.0, 2.0], vec![1.0], 0);
+        let _ = Fragment::new(0, FragmentKind::Text, vec![1.0, 2.0], vec![1.0], 0);
     }
 
     // -- known_fraction & missing_count --------------------------------------
@@ -501,9 +503,7 @@ mod tests {
         for (orig, restored) in data.iter().zip(r.field.values.iter()) {
             assert!(
                 (orig - restored).abs() < 1e-12,
-                "known value changed: {} -> {}",
-                orig,
-                restored
+                "known value changed: {orig} -> {restored}"
             );
         }
     }
@@ -516,7 +516,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore(&f, &config);
         let mid = r.field.values[1];
-        assert!((mid - 20.0).abs() < 1.0, "expected ~20, got {}", mid);
+        assert!((mid - 20.0).abs() < 1.0, "expected ~20, got {mid}");
     }
 
     #[test]
@@ -550,12 +550,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore(&f, &config);
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!(
-                (v - 100.0).abs() < 5.0,
-                "index {} too far from 100: {}",
-                i,
-                v
-            );
+            assert!((v - 100.0).abs() < 5.0, "index {i} too far from 100: {v}");
         }
     }
 
@@ -587,8 +582,10 @@ mod tests {
         let data = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         let mask = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         let f = Fragment::new(7, FragmentKind::Text, data, mask, 0);
-        let mut config = InversionConfig::default();
-        config.confidence_floor = 0.05;
+        let config = InversionConfig {
+            confidence_floor: 0.05,
+            ..Default::default()
+        };
         let r = restore(&f, &config);
         assert!(
             r.field.confidence.scores[1] > r.field.confidence.scores[4],
@@ -603,11 +600,13 @@ mod tests {
         let data = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let mask = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let f = Fragment::new(8, FragmentKind::Text, data, mask, 0);
-        let mut config = InversionConfig::default();
-        config.confidence_floor = 0.3;
+        let config = InversionConfig {
+            confidence_floor: 0.3,
+            ..Default::default()
+        };
         let r = restore(&f, &config);
         for &s in &r.field.confidence.scores {
-            assert!(s >= 0.3 - 1e-12, "confidence below floor: {}", s);
+            assert!(s >= 0.3 - 1e-12, "confidence below floor: {s}");
         }
     }
 
@@ -666,7 +665,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore(&f, &config);
         for &v in &r.field.values {
-            assert!((v - 0.0).abs() < 1e-6, "expected ~0, got {}", v);
+            assert!((v - 0.0).abs() < 1e-6, "expected ~0, got {v}");
         }
     }
 
@@ -798,8 +797,7 @@ mod tests {
         for &v in &r.field.values {
             assert!(
                 (v - 25.0).abs() < 3.0,
-                "multimodal fusion should give ~25: {}",
-                v
+                "multimodal fusion should give ~25: {v}"
             );
         }
     }

@@ -366,12 +366,10 @@ mod tests {
         dct2_1d(&input, &mut forward, &table);
         idct3_1d(&forward, &mut inverse, &table);
 
-        for i in 0..n {
+        for (i, val) in inverse.iter().enumerate().take(n) {
             assert!(
-                (42.0 - inverse[i]).abs() < 1e-10,
-                "constant round-trip failed at {}: {}",
-                i,
-                inverse[i]
+                (42.0 - val).abs() < 1e-10,
+                "constant round-trip failed at {i}: {val}",
             );
         }
     }
@@ -386,7 +384,7 @@ mod tests {
         let row_table = CosineTable::new(cols);
         let col_table = CosineTable::new(rows);
 
-        let input: Vec<f64> = (0..n).map(|i| (i as f64) * 0.7 + 1.0).collect();
+        let input: Vec<f64> = (0..n).map(|i| (i as f64).mul_add(0.7, 1.0)).collect();
         let mut forward = vec![0.0; n];
         let mut inverse = vec![0.0; n];
 
@@ -484,7 +482,7 @@ mod tests {
 
         // All values should be close to 10 (constant field)
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!((v - 10.0).abs() < 3.0, "index {} should be ~10: {}", i, v);
+            assert!((v - 10.0).abs() < 3.0, "index {i} should be ~10: {v}");
         }
     }
 
@@ -512,10 +510,7 @@ mod tests {
         for (i, (&orig, &rest)) in data.iter().zip(r.field.values.iter()).enumerate() {
             assert!(
                 (orig - rest).abs() < 1e-6,
-                "known value changed at {}: {} -> {}",
-                i,
-                orig,
-                rest
+                "known value changed at {i}: {orig} -> {rest}"
             );
         }
     }
@@ -537,12 +532,10 @@ mod tests {
             forward[0]
         );
         // All higher-frequency components should be ~0
-        for k in 1..n {
+        for (k, val) in forward.iter().enumerate().take(n).skip(1) {
             assert!(
-                forward[k].abs() < 1e-8,
-                "non-DC component at k={} should be 0: {}",
-                k,
-                forward[k]
+                val.abs() < 1e-8,
+                "non-DC component at k={k} should be 0: {val}",
             );
         }
     }

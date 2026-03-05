@@ -407,7 +407,7 @@ mod tests {
         let r = fuse_grid(&grid, &obs, &config);
 
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!((v - 50.0).abs() < 2.0, "index {} should be ~50: {}", i, v);
+            assert!((v - 50.0).abs() < 2.0, "index {i} should be ~50: {v}");
         }
     }
 

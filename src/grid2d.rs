@@ -176,7 +176,7 @@ pub fn restore_2d(grid: &Grid2D, config: &Grid2DConfig) -> RestorationResult {
                 let smooth_grad = restored[idx] - neighbor_avg;
                 let reg_grad = config.regularization * (restored[idx] - mean_known);
                 let grad = smooth_grad + reg_grad;
-                let new_val = restored[idx] - 0.5 * grad;
+                let new_val = 0.5f64.mul_add(-grad, restored[idx]);
                 let change = (new_val - restored[idx]).abs();
                 if change > max_change {
                     max_change = change;
@@ -319,10 +319,7 @@ mod tests {
         for (i, (&orig, &rest)) in data.iter().zip(r.field.values.iter()).enumerate() {
             assert!(
                 (orig - rest).abs() < 1e-12,
-                "index {} changed: {} -> {}",
-                i,
-                orig,
-                rest
+                "index {i} changed: {orig} -> {rest}"
             );
         }
     }
@@ -399,8 +396,10 @@ mod tests {
         data[4] = 0.0;
         mask[4] = 0.0;
         let grid = make_grid(3, 3, data, mask);
-        let mut config = Grid2DConfig::default();
-        config.neighbor_mode = NeighborMode::Eight;
+        let config = Grid2DConfig {
+            neighbor_mode: NeighborMode::Eight,
+            ..Default::default()
+        };
         let r = restore_2d(&grid, &config);
         assert!(
             (r.field.values[4] - 10.0).abs() < 0.5,
@@ -424,12 +423,16 @@ mod tests {
         mask[24] = 1.0;
         let grid = make_grid(5, 5, data, mask);
 
-        let mut config4 = Grid2DConfig::default();
-        config4.neighbor_mode = NeighborMode::Four;
+        let config4 = Grid2DConfig {
+            neighbor_mode: NeighborMode::Four,
+            ..Default::default()
+        };
         let r4 = restore_2d(&grid, &config4);
 
-        let mut config8 = Grid2DConfig::default();
-        config8.neighbor_mode = NeighborMode::Eight;
+        let config8 = Grid2DConfig {
+            neighbor_mode: NeighborMode::Eight,
+            ..Default::default()
+        };
         let r8 = restore_2d(&grid, &config8);
 
         // Both should converge (iterations < max)
@@ -481,8 +484,10 @@ mod tests {
         data[12] = 100.0; // center
         mask[12] = 1.0;
         let grid = make_grid(5, 5, data, mask);
-        let mut config = Grid2DConfig::default();
-        config.confidence_floor = 0.05;
+        let config = Grid2DConfig {
+            confidence_floor: 0.05,
+            ..Default::default()
+        };
         let r = restore_2d(&grid, &config);
         // Center = 1.0
         assert!((r.field.confidence.scores[12] - 1.0).abs() < 1e-12);
@@ -499,11 +504,13 @@ mod tests {
         data[0] = 1.0;
         mask[0] = 1.0;
         let grid = make_grid(5, 5, data, mask);
-        let mut config = Grid2DConfig::default();
-        config.confidence_floor = 0.3;
+        let config = Grid2DConfig {
+            confidence_floor: 0.3,
+            ..Default::default()
+        };
         let r = restore_2d(&grid, &config);
         for &s in &r.field.confidence.scores {
-            assert!(s >= 0.3 - 1e-12, "confidence below floor: {}", s);
+            assert!(s >= 0.3 - 1e-12, "confidence below floor: {s}");
         }
     }
 
@@ -604,8 +611,7 @@ mod tests {
         for &v in &r.field.values {
             assert!(
                 v.abs() < 1e-10,
-                "all-missing 2D should stay near 0, got {}",
-                v
+                "all-missing 2D should stay near 0, got {v}"
             );
         }
     }

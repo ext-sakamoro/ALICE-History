@@ -148,7 +148,7 @@ pub fn restore_sparse(grid: &Grid2D, config: &SparseConfig) -> RestorationResult
 
         // Working point for gradient (FISTA uses momentum point)
         let work = if config.use_fista && iter > 0 {
-            let t_k1 = (1.0 + (1.0 + 4.0 * t_k * t_k).sqrt()) * 0.5;
+            let t_k1 = (1.0 + (4.0 * t_k).mul_add(t_k, 1.0).sqrt()) * 0.5;
             let momentum = (t_k - 1.0) / t_k1;
             t_k = t_k1;
 
@@ -284,16 +284,15 @@ mod tests {
         let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
         let mask = vec![1.0; 9];
         let grid = Grid2D::new(3, 3, data.clone(), mask);
-        let mut config = SparseConfig::default();
-        config.use_fista = false;
+        let config = SparseConfig {
+            use_fista: false,
+            ..Default::default()
+        };
         let r = restore_sparse(&grid, &config);
         for (i, (&orig, &rest)) in data.iter().zip(r.field.values.iter()).enumerate() {
             assert!(
                 (orig - rest).abs() < 1e-6,
-                "known value changed at {}: {} -> {}",
-                i,
-                orig,
-                rest
+                "known value changed at {i}: {orig} -> {rest}"
             );
         }
     }
@@ -310,10 +309,7 @@ mod tests {
         for (i, (&orig, &rest)) in data.iter().zip(r.field.values.iter()).enumerate() {
             assert!(
                 (orig - rest).abs() < 1e-6,
-                "FISTA known value changed at {}: {} -> {}",
-                i,
-                orig,
-                rest
+                "FISTA known value changed at {i}: {orig} -> {rest}"
             );
         }
     }
@@ -346,12 +342,7 @@ mod tests {
         // Constant signal has DC-only DCT representation (maximally sparse)
         // Reconstructed values should be close to 50
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!(
-                (v - 50.0).abs() < 15.0,
-                "index {} should be near 50: {}",
-                i,
-                v
-            );
+            assert!((v - 50.0).abs() < 15.0, "index {i} should be near 50: {v}");
         }
     }
 
@@ -415,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_soft_threshold_preserves_large_coefficients() {
-        let vals = vec![10.0, -10.0, 0.5, -0.5, 0.0, 100.0];
+        let vals = [10.0, -10.0, 0.5, -0.5, 0.0, 100.0];
         let threshold = 1.0;
         let result: Vec<f64> = vals.iter().map(|&v| soft_threshold(v, threshold)).collect();
         assert!((result[0] - 9.0).abs() < 1e-15);
@@ -434,8 +425,7 @@ mod tests {
         for &v in &vals {
             assert!(
                 (soft_threshold(v, 100.0) - 0.0).abs() < 1e-15,
-                "expected 0 for {}",
-                v
+                "expected 0 for {v}"
             );
         }
     }
@@ -522,10 +512,7 @@ mod tests {
             if m == 1.0 {
                 assert!(
                     (v - d).abs() < 1e-6,
-                    "ISTA: known value at index {} changed: {} -> {}",
-                    i,
-                    d,
-                    v
+                    "ISTA: known value at index {i} changed: {d} -> {v}"
                 );
             }
         }
@@ -546,7 +533,7 @@ mod tests {
         };
         let r = restore_sparse(&grid, &config);
         for &s in &r.field.confidence.scores {
-            assert!(s >= 0.2 - 1e-12, "sparse confidence {} below floor", s);
+            assert!(s >= 0.2 - 1e-12, "sparse confidence {s} below floor");
         }
     }
 }

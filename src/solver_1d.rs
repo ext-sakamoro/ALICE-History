@@ -178,9 +178,7 @@ mod tests {
         for (orig, restored) in data.iter().zip(r.field.values.iter()) {
             assert!(
                 (orig - restored).abs() < 1e-12,
-                "known value changed: {} -> {}",
-                orig,
-                restored
+                "known value changed: {orig} -> {restored}"
             );
         }
     }
@@ -193,7 +191,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore_1d(&f, &config);
         let mid = r.field.values[1];
-        assert!((mid - 20.0).abs() < 1.0, "expected ~20, got {}", mid);
+        assert!((mid - 20.0).abs() < 1.0, "expected ~20, got {mid}");
     }
 
     #[test]
@@ -229,7 +227,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore_1d(&f, &config);
         for &v in &r.field.values {
-            assert!((v - 0.0).abs() < 1e-6, "expected ~0, got {}", v);
+            assert!((v - 0.0).abs() < 1e-6, "expected ~0, got {v}");
         }
     }
 
@@ -279,12 +277,7 @@ mod tests {
         let config = InversionConfig::default();
         let r = restore_1d(&f, &config);
         for (i, &v) in r.field.values.iter().enumerate() {
-            assert!(
-                (v - 100.0).abs() < 5.0,
-                "index {} too far from 100: {}",
-                i,
-                v
-            );
+            assert!((v - 100.0).abs() < 5.0, "index {i} too far from 100: {v}");
         }
     }
 

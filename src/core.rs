@@ -8,10 +8,10 @@ use crate::{ConfidenceMap, EntropyMeasurement, FragmentKind};
 // FNV-1a hash
 // ---------------------------------------------------------------------------
 
-pub(crate) const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-pub(crate) const FNV_PRIME: u64 = 0x0100_0000_01b3;
+pub const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+pub const FNV_PRIME: u64 = 0x0100_0000_01b3;
 
-pub(crate) fn fnv1a(data: &[u8]) -> u64 {
+pub fn fnv1a(data: &[u8]) -> u64 {
     let mut h = FNV_OFFSET;
     for &b in data {
         h ^= u64::from(b);
@@ -21,7 +21,7 @@ pub(crate) fn fnv1a(data: &[u8]) -> u64 {
 }
 
 /// Hash helper: convert an f64 slice to bytes and hash.
-pub(crate) fn hash_f64_slice(slice: &[f64]) -> u64 {
+pub fn hash_f64_slice(slice: &[f64]) -> u64 {
     let mut buf = Vec::with_capacity(slice.len() * 8);
     for &v in slice {
         buf.extend_from_slice(&v.to_le_bytes());
@@ -30,7 +30,7 @@ pub(crate) fn hash_f64_slice(slice: &[f64]) -> u64 {
 }
 
 /// Build a content hash for a Fragment from id + kind discriminant + data.
-pub(crate) fn fragment_content_hash(id: u64, kind: FragmentKind, data: &[f64]) -> u64 {
+pub fn fragment_content_hash(id: u64, kind: FragmentKind, data: &[f64]) -> u64 {
     let mut buf: Vec<u8> = Vec::with_capacity(8 + 1 + data.len() * 8);
     buf.extend_from_slice(&id.to_le_bytes());
     buf.push(kind as u8);
@@ -111,7 +111,7 @@ pub fn measure_entropy(data: &[f64], bins: usize) -> EntropyMeasurement {
 ///
 /// Known elements receive confidence 1.0; missing elements receive a value
 /// that decays with distance (1 / (1 + distance)), clamped above `floor`.
-pub(crate) fn compute_confidence(
+pub fn compute_confidence(
     _data: &[f64],
     mask: &[f64],
     _restored: &[f64],
@@ -176,12 +176,7 @@ pub(crate) fn compute_confidence(
 /// Pass 1 (top-left → bottom-right): d(r,c) = min(d(r,c), d(r-1,c)+1, d(r,c-1)+1)
 /// Pass 2 (bottom-right → top-left): d(r,c) = min(d(r,c), d(r+1,c)+1, d(r,c+1)+1)
 /// confidence = max(floor, 1.0 / (1.0 + distance))
-pub(crate) fn compute_confidence_2d(
-    mask: &[f64],
-    rows: usize,
-    cols: usize,
-    floor: f64,
-) -> ConfidenceMap {
+pub fn compute_confidence_2d(mask: &[f64], rows: usize, cols: usize, floor: f64) -> ConfidenceMap {
     let n = rows * cols;
     if n == 0 {
         return ConfidenceMap {
@@ -264,7 +259,7 @@ pub(crate) fn compute_confidence_2d(
 // ---------------------------------------------------------------------------
 
 /// Compute a result-level content hash from `fragment_id` + field `content_hash`.
-pub(crate) fn result_content_hash(fragment_id: u64, field_hash: u64) -> u64 {
+pub fn result_content_hash(fragment_id: u64, field_hash: u64) -> u64 {
     let mut buf = Vec::with_capacity(16);
     buf.extend_from_slice(&fragment_id.to_le_bytes());
     buf.extend_from_slice(&field_hash.to_le_bytes());
@@ -395,8 +390,7 @@ mod tests {
         for &s in &cm.scores {
             assert!(
                 (s - 1.0).abs() < 1e-12,
-                "all-known should score 1.0, got {}",
-                s
+                "all-known should score 1.0, got {s}"
             );
         }
         assert!((cm.mean_confidence - 1.0).abs() < 1e-12);
@@ -437,7 +431,7 @@ mod tests {
         let floor = 0.25;
         let cm = compute_confidence(&[0.0; 10], &mask, &[0.0; 10], floor);
         for &s in &cm.scores {
-            assert!(s >= floor - 1e-12, "score {} below floor {}", s, floor);
+            assert!(s >= floor - 1e-12, "score {s} below floor {floor}");
         }
     }
 
@@ -445,7 +439,7 @@ mod tests {
     fn test_compute_confidence_min_confidence_correct() {
         let mask = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let cm = compute_confidence(&[0.0; 10], &mask, &[0.0; 10], 0.0);
-        let actual_min = cm.scores.iter().cloned().fold(f64::INFINITY, f64::min);
+        let actual_min = cm.scores.iter().copied().fold(f64::INFINITY, f64::min);
         assert!(
             (cm.min_confidence - actual_min).abs() < 1e-12,
             "reported min {} != actual min {}",
@@ -501,7 +495,7 @@ mod tests {
         let floor = 0.3;
         let cm = compute_confidence_2d(&mask, 5, 5, floor);
         for &s in &cm.scores {
-            assert!(s >= floor - 1e-12, "2D score {} below floor", s);
+            assert!(s >= floor - 1e-12, "2D score {s} below floor");
         }
     }
 
