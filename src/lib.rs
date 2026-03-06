@@ -25,10 +25,13 @@ pub(crate) mod cosine_table;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod frequency;
+pub mod gpu;
 pub mod grid2d;
 pub mod multimodal;
+pub mod nonlinear;
 pub mod solver_1d;
 pub mod sparse;
+pub mod temporal;
 
 // ---------------------------------------------------------------------------
 // Re-exports
