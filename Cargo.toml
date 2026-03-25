@@ -2,7 +2,7 @@
 name = "alice-history"
 version = "0.1.0"
 edition = "2021"
-authors = ["Moroya Sakamoto"]
+authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
 description = "Inverse entropy restoration — reversing information degradation to recover original historical data"
 license = "AGPL-3.0-or-later"
 
