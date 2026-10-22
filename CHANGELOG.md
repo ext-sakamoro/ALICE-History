@@ -9,6 +9,8 @@ All notable changes to ALICE-History will be documented in this file.
 - CI: `ci/**` の branch への送信でも CI を走らせる
 - preflight: `.github/preflight-exact` を置いた `scripts/preflight.sh` が生成器の出力 (見出しの `generator rev` の版) と byte で一致しなければ送る前の確認が通らない
 - 設定 file の comment を中身の説明だけにし、.gitignore を project の build 出力だけにした
+- ライセンス全文を公式の AGPL v3 に置き換え
+- TRADEMARK_NOTICE が指す licence の file を LICENSE-* の file にした
 
 ## [0.1.0] - 2026-02-23
 
