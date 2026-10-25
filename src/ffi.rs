@@ -2,7 +2,7 @@
 //!
 //! Provides 10 `extern "C"` functions for Unity / UE5 / native integration.
 //!
-//! License: AGPL-3.0-or-later
+//! License: LicenseRef-Proprietary
 //! Author: Moroya Sakamoto
 
 use std::slice;

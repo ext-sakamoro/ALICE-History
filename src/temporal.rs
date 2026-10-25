@@ -1,5 +1,5 @@
 // ALICE-History — Temporal coherence solver
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 //! Temporal Coherence Solver — 時間次元付き体積復元。
 //!

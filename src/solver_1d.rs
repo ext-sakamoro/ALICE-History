@@ -1,5 +1,5 @@
 // ALICE-History — 1D inverse entropy restoration solver
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (C) 2026 Moroya Sakamoto
 
 use rayon::prelude::*;

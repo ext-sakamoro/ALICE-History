@@ -1,5 +1,5 @@
 // ALICE-History — Unity C# バインディング
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (C) 2026 Moroya Sakamoto
 //
 // 10 FFI 関数 (Fragment 3 + InversionConfig 2 + restore 1 + RestorationResult 4)

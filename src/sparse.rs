@@ -1,5 +1,5 @@
 // ALICE-History — Level 3: Compressed sensing (ISTA / FISTA)
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (C) 2026 Moroya Sakamoto
 
 use crate::core::{compute_confidence_2d, hash_f64_slice, measure_entropy, result_content_hash};

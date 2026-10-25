@@ -1,5 +1,5 @@
 // ALICE-History — Non-linear restoration
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 //! Non-linear Restoration — Newton法 + Total Variation 正則化。
 //!
